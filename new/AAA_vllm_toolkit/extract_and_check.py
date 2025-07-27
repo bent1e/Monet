@@ -1,7 +1,3 @@
-from AAA_vllm_toolkit.eval_utils.math_equal import math_equal
-from AAA_vllm_toolkit.eval_utils.checker import check_one_answer
-from AAA_vllm_toolkit.eval_utils.util import equiv, strip_string, choice_answer_clean
-from math_evaluation import is_equiv
 import re
 from typing import Any, Dict, Type, Optional, List, Tuple, Union
 from vllm import LLM, SamplingParams
@@ -112,83 +108,6 @@ def extract_no_boxed_answer(
 
 
 
-
-def rule_equiv(gt, pred, grt_choices = None): # grt_choices is a list that lists the ground truth choices if it's a multi-choice question
-    # In this function, I integrated multiple open-source evaluation tools
-    # each with its own judgment logic and strengths in handling special cases such as LaTeX, units, etc.
-    gt = str(gt)
-    pred = str(pred)
-    try:
-        if gt.strip().lower() == pred.strip().lower():
-            return True
-        
-        pred_choice = None
-        if pred.lower() in ["a", "b", "c", "d", "e", "f"]:
-            pred_choice = pred[0]
-        
-        if pred[:2].lower() in ['a:', 'b:', 'c:', 'd:', 'e:', 'f:', 'a.', 'b.', 'c.', 'd.', 'e.', 'f.']: # for preds like "A: 1.414"
-            pred_choice = pred[0]
-
-        if pred[:3].lower() in ['(a)', '(b)', '(c)', '(d)', '(e)', '(f)']: # for preds like "(a) 1.414"
-            pred_choice = pred[1]
-
-            
-
-        # If gt is not in ['A', 'B', 'C', 'D', 'E'] but pred is in ['A', 'B', 'C', 'D', 'E']
-        if gt.lower() not in ['a', 'b', 'c', 'd', 'e', 'f'] and pred_choice is not None:
-            choices = ['a', 'b', 'c', 'd', 'e', 'f']
-            ground_truth_choice = choices[grt_choices.index(gt)]
-            if ground_truth_choice.lower() == pred_choice.lower():
-                return True
-            
-        # If gt is in ['A', 'B', 'C', 'D', 'E'] but pred is not in ['A', 'B', 'C', 'D', 'E']
-        if gt.lower() in ['a', 'b', 'c', 'd', 'e', 'f'] and pred_choice is None and grt_choices is not None:
-            choices = ['a', 'b', 'c', 'd', 'e', 'f']
-            pred_choice = choices[grt_choices.index(pred)]
-            #print("pred_choice", pred_choice)
-            if gt.lower() == pred_choice.lower():
-                return True
-
-        # Check if both gt and pred are words (no numbers) and pred is a substring of gt
-        if not any(char.isdigit() for char in gt) and not any(char.isdigit() for char in pred):
-            if pred.strip().lower() in gt.strip().lower():
-                return True
-
-        # Check if gt or pred contains "√{*}" and convert to "\sqrt{*}"
-        sqrt_pattern = r"√\{(.*?)\}"
-        gt = re.sub(sqrt_pattern, r"\\sqrt{\1}", gt)
-        pred = re.sub(sqrt_pattern, r"\\sqrt{\1}", pred)
-            
-
-        # For college-math and omni-math, the pred and gt positions need to be changed.
-        # Because we found that the quality of ground truth in a small subset of problems within benchmarks like college-math is relatively low.
-        if any(
-            func(x, y) for func in [math_equal, is_equiv, check_one_answer] for x, y in [(gt, pred), (pred, gt)]
-        ):
-            return True
-        # special for college-math, etc.
-        gt_strip, pred_strip = strip_string(gt), strip_string(pred)
-        if any(
-            func(x, y) for func in [math_equal, is_equiv, check_one_answer] for x, y in [(gt_strip, pred_strip), (pred_strip, gt_strip)]
-        ):
-            return True
-
-        # for choice question
-        if gt in ["A", "B", "C", "D", "E"] and pred not in ["A", "B", "C", "D", "E"]:
-            pred = choice_answer_clean(pred)
-            if math_equal(gt, pred):
-                return True
-        elif is_multi_choice(gt) and not is_multi_choice(pred):
-            pred = "".join(
-                [c for c in pred if c in ["A", "B", "C", "D", "E"]]
-            )
-            if math_equal(gt, pred):
-                return True
-    except Exception as e:
-        #print("maroi_equiv error")
-        #print(e)
-        pass
-    return False
 
 
 def remove_text_box(text):
@@ -308,9 +227,9 @@ def batch_judge(preds, gts, gt_choicess=None, questions=None, llm: LLM = None, u
         if mathruler_grade_answer(pred, gt):
             results.append(1)
             continue
-        elif is_equiv(gt, pred):
-            results.append(1)
-            continue
+        #elif is_equiv(gt, pred):
+        #    results.append(1)
+        #    continue
         elif llm_judge_resp is not None:
             text = llm_judge_resp.outputs[0].text.strip()
             if text == "1":
