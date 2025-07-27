@@ -12,7 +12,7 @@ from utils import *
 from task import *
 from trainer import CustomTrainerStage1, CustomTrainerStage2
 from trainer import CustomTrainerAVTStage1
-
+import random
 
 seed_everything(seed=42)
 args=get_args()
@@ -32,10 +32,12 @@ logging.info(args)
 logging.info('=='*20)
 
 # Load the model and processor
-cache_dir = '/data1/qxwang/cache2/hf_dataset_cache'
+cache_dir = '/fs1/home/frankyang17/qixun/cache'
 os.environ['HF_HOME'] = cache_dir
 
+patch=14 # processor.image_processor.patch_size
 processor = AutoProcessor.from_pretrained(args.model)
+
 if args.stage in ['stage1', 'stage2']:
     processor.tokenizer.add_tokens("<|latent_pad|>", special_tokens=True)
     processor.tokenizer.add_tokens("<|latent_start|>", special_tokens=True)
@@ -185,11 +187,16 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
     student_texts = replace_visual_spectial_tokens_avt(texts)
 
     image_inputs, _ = process_vision_info(examples)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
 
     user_examples = remove_assistant_images(examples)
     user_text = [processor.apply_chat_template(example, tokenize=False) for example in user_examples]
     user_text = replace_visual_spectial_tokens_avt(user_text)
     user_image_inputs, _ = process_vision_info(user_examples)
+    if new_sizes is not None:
+        for i, img in enumerate(user_image_inputs):
+            img = img.resize(new_sizes[i], Image.BICUBIC)
+            user_image_inputs[i] = img
     user_batch = processor(text=user_text, images=user_image_inputs, return_tensors="pt", padding=True)
 
     assistant_examples = remove_user_images(examples)
@@ -198,16 +205,17 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
     assistant_image_inputs, _ = process_vision_info(assistant_examples)
     assistant_batch = processor(text=assistant_text, images=assistant_image_inputs, return_tensors="pt", padding=True)
 
+    assert student_texts[0].count("<|image_pad|>") == len(image_inputs)
     student_batch = processor(text=student_texts, images=image_inputs, return_tensors="pt", padding=True)
     teacher_batch = processor(text=texts, images=image_inputs, return_tensors="pt", padding=True)
 
     batch = {}
 
-    batch['pixel_values'] = user_batch['pixel_values']
-    batch['image_grid_thw'] = user_batch['image_grid_thw']
+    batch['user_pixel_values'] = user_batch['pixel_values']
+    batch['user_image_grid_thw'] = user_batch['image_grid_thw']
 
-    batch['teacher_pixel_values'] = assistant_batch['pixel_values']
-    batch['teacher_image_grid_thw'] = assistant_batch['image_grid_thw']
+    batch['user_assistant_pixel_values'] = student_batch['pixel_values']
+    batch['user_assistant_image_grid_thw'] = student_batch['image_grid_thw']
 
     batch_assistant_img_token_lens_merged = [(t[1]*t[2]).item()//4 for t in assistant_batch['image_grid_thw']]
     batch_assistant_img_token_lens = []
@@ -229,13 +237,13 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
     batch["student_input_ids"], batch["student_attention_mask"] = process_batch(student_batch["input_ids"], student_batch["attention_mask"], 
                                                       latent_start_idx, latent_end_idx, latent_token_idx, args.latent_size, end_pad_token_idx, batch_assistant_img_token_lens)
     
-    # <|latent_start|><|image_pad|>...<|image_pad|><|latent_end|> -> <|latent_start|><abs_vis_token_pad>...<|image_pad|><|latent_end|>
-    batch["teacher_input_ids"] = replace_assistant_image_pad_with_latent_pad(teacher_batch["input_ids"], answer_start_token_pattern, img_pad_token_idx, latent_token_idx)
+
+    batch["teacher_input_ids"] = teacher_batch["input_ids"] #replace_assistant_image_pad_with_latent_pad(teacher_batch["input_ids"], answer_start_token_pattern, img_pad_token_idx, latent_token_idx)
     batch["teacher_attention_mask"] = teacher_batch["attention_mask"]
 
     if alignment == "observation_end":
         alignment_pattern = observation_end_idx
-    elif alignment == "boxed_end":
+    elif alignment == "boxed_start":
         alignment_pattern = [processor.tokenizer("\\boxed{", return_tensors="pt")["input_ids"][0], processor.tokenizer(" \\boxed{", return_tensors="pt")["input_ids"][0]]
         
     batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, alignment_pattern)
@@ -256,14 +264,23 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
 
 
 preprocess_function = task_preporcess_config[args.task]
-if args.data_path.endswith('.jsonl'):
-    train_dataset = load_jsonl_dataset(args.data_path)
-elif args.data_path.endswith('.json'):
-    train_dataset = load_json_dataset(args.data_path)
-
+all_train_dataset = []
+for data_path in args.data_path:
+    if data_path.endswith('.jsonl'):
+        train_dataset = load_jsonl_dataset(data_path)
+    elif data_path.endswith('.json'):
+        train_dataset = load_json_dataset(data_path)
+    all_train_dataset.extend(train_dataset)
+random.shuffle(all_train_dataset)
 # Check if the preprocess function is abstract_visual_token_single_input_images_preprocess_function
-train_dataset = [preprocess_function(sample) for sample in train_dataset[11:]]
+train_dataset = [preprocess_function(sample) for sample in all_train_dataset[:]]
 
+
+exp_name = args.alignment + f"-ep{args.epochs}-lr{1e-5}"
+for data_path in args.data_path:
+    dataset_name = data_path.split("/")[-2]
+    exp_name += f"-{dataset_name}"
+save_dir = f"./checkpoints/{exp_name}"
 
 if args.stage in ['stage1']:
     CustomTrainer = CustomTrainerStage1
@@ -275,8 +292,9 @@ elif args.stage in ['avt_stage1']:
     CustomTrainer = CustomTrainerAVTStage1
     collate_fn = partial(collate_fn_avt_stage1, alignment=args.alignment)
 
+
 training_args = SFTConfig(
-    output_dir=args.save_model_path,
+    output_dir=save_dir,
     num_train_epochs=args.epochs,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
@@ -306,6 +324,7 @@ trainer = CustomTrainer(
     train_dataset=train_dataset,
     data_collator=collate_fn,
     tokenizer=processor.tokenizer,
+    exp_name=exp_name
 )
 
 trainer.train()

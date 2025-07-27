@@ -7,6 +7,8 @@ import random
 import argparse
 from datasets import Dataset
 from typing import List, Union
+import math
+from PIL import Image
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -20,7 +22,7 @@ def get_args():
     
     parser.add_argument("--epochs", type=int, default=10)   
     
-    parser.add_argument("--data_path", type=str, default='PathToJsonlData')    
+    parser.add_argument("--data_path", type=str, default='PathToJsonlData', nargs='+')    
     parser.add_argument("--log_file", type=str, default='./log.txt')
     
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/model_stage1')
@@ -29,7 +31,7 @@ def get_args():
     parser.add_argument("--devices", type=str, nargs='+', default=['cuda:0'])
 
     parser.add_argument("--add_reflection", action='store_true', default=False, help="Whether to add reflection in the assistant's response.")
-    parser.add_argument("--alignment", type=str, default="observation_end", choices=["observation_end", "boxed_end"], help="The alignment strategy for AVT.")
+    parser.add_argument("--alignment", type=str, default="observation_end", choices=["observation_end", "boxed_start"], help="The alignment strategy for AVT.")
     return parser.parse_args()
 
 def seed_everything(seed: int = 42):
@@ -361,7 +363,7 @@ def find_ids_poss(input_ids: torch.Tensor, answer_start_token_pattern: torch.Ten
             start_idx = find_subsequence(input_ids[i], ids_tensor_or_list, start_idx+1)
             if start_idx != -1:
                 manipulation_result_poss.append(start_idx)
-        manipulation_result_poss = manipulation_result_poss[1:] # remove the first '\\boxed{', which is from the direct answer without avt
+        manipulation_result_poss = manipulation_result_poss[:] # remove the first '\\boxed{', which is from the direct answer without avt
         batch_poss.append(manipulation_result_poss)
     return batch_poss
 
@@ -502,6 +504,41 @@ def mask_image_output_tokens(
                 mask[i, k] = 1
 
     return mask
+
+
+
+def resize_by_token_budget(images,
+                           global_max_pixels=1500*28*28,
+                           per_img_max_pixels=800*28*28,
+                           divisor=28):
+    """等比缩放，保证一条样本内所有图像像素和 ≤ global_max_pixels"""
+    # 1) 统计原总像素
+    
+    total = sum(img.width * img.height for img in images)
+    if total <= global_max_pixels:
+        return images, None   # 大多数样本会直接返回
+
+    # 2) 统一缩放系数
+    ratio = math.sqrt(global_max_pixels / total)
+
+    processed = []
+    new_sizes = []
+    for img in images:
+        w, h = int(img.width * ratio), int(img.height * ratio)
+        # 保证能被 28 整除（Qwen 的 patch 大小）
+        w = max(divisor, (w // divisor) * divisor)
+        h = max(divisor, (h // divisor) * divisor)
+
+        # 3) 仍然超过单张上限时再单独缩放
+        if w * h > per_img_max_pixels:
+            r = math.sqrt(per_img_max_pixels / (w * h))
+            w = max(divisor, int(w * r) // divisor * divisor)
+            h = max(divisor, int(h * r) // divisor * divisor)
+
+        processed.append(img.resize((w, h), Image.BICUBIC))
+        new_sizes.append((w, h))
+    return processed, new_sizes
+
 
 
 if __name__=="__main__":

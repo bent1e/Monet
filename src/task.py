@@ -1,6 +1,6 @@
 from PIL import Image
 from pathlib import Path
-
+import os
 def single_input_image_preprocess_function(sample):
     # Load images
     image = Image.open(sample["image_input"][0]).convert("RGB") 
@@ -111,7 +111,7 @@ def avt_single_input_images_preprocess_function(sample):
     Preprocess function for AVT with single input images.
     """
     conversations = sample
-    dataset_root = Path('./new')
+    dataset_root = '/fs1/home/frankyang17/qixun/dataset'
     
     # Process image loading for all steps first
     for i, step in enumerate(conversations):
@@ -120,7 +120,8 @@ def avt_single_input_images_preprocess_function(sample):
             new_step["content"][0]["text"] = "You are a helpful assistant."
         for j, content in enumerate(new_step["content"]):
             if content["type"] == "image":
-                content["image"] = Image.open((Path(dataset_root)/content.pop("image_file_name")).resolve()).convert("RGB")
+                content["image"] = os.path.join(dataset_root,content.pop("image_file_name")) #Image.open((Path(dataset_root)/content.pop("image_file_name")).resolve()).convert("RGB") #  Image.open('/fs1/home/frankyang17/qixun/code/abstract-visual-token/data/images/level_6/23/map_6x6_step_0.png').convert("RGB") # 
+                #print(content["image"].size)
             new_step["content"][j] = content
         conversations[i] = new_step
     

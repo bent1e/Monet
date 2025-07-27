@@ -1656,14 +1656,14 @@ class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):
 @dataclass
 class Qwen2_5_VLCausalLMOutputAVT(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
-    #student_loss: Optional[torch.FloatTensor] = None
+    student_loss: Optional[torch.FloatTensor] = None
     student_logits: Optional[torch.FloatTensor] = None
     student_past_key_values: Optional[List[torch.FloatTensor]] = None
     student_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     student_attentions: Optional[Tuple[torch.FloatTensor]] = None
     student_rope_deltas: Optional[torch.LongTensor] = None
     student_inputs_embeds: Optional[torch.FloatTensor] = None
-    #teacher_loss: Optional[torch.FloatTensor] = None
+    teacher_loss: Optional[torch.FloatTensor] = None
     teacher_logits: Optional[torch.FloatTensor] = None
     teacher_past_key_values: Optional[List[torch.FloatTensor]] = None
     teacher_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
@@ -1991,15 +1991,15 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        pixel_values: Optional[torch.Tensor] = None,
+        user_pixel_values: Optional[torch.Tensor] = None,
         pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
+        user_image_grid_thw: Optional[torch.LongTensor] = None,
         video_grid_thw: Optional[torch.LongTensor] = None,
         rope_deltas: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
-        pixel_values_latent: Optional[torch.Tensor] = None, # Ours (Latent Tokens)
-        image_grid_thw_latent: Optional[torch.LongTensor] = None, # Ours (Latent Tokens)
+        user_assistant_pixel_values: Optional[torch.Tensor] = None, # Ours (Latent Tokens)
+        user_assistant_image_grid_thw: Optional[torch.LongTensor] = None, # Ours (Latent Tokens)
         image_out_mask: Optional[torch.Tensor] = None, # Ours (Latent Token Mask)
         generate_mode: Optional[bool] = False,
         latent_hidden_states: Optional[torch.Tensor] = None, # Ours (Latent Tokens)
@@ -2007,8 +2007,6 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         teacher_input_ids: torch.LongTensor = None, # AVT
         student_attention_mask: Optional[torch.Tensor] = None, # AVT
         teacher_attention_mask: Optional[torch.Tensor] = None, # AVT
-        teacher_pixel_values: Optional[torch.Tensor] = None, # AVT
-        teacher_image_grid_thw: Optional[torch.LongTensor] = None, # AVT
         student_labels: Optional[torch.LongTensor] = None, # AVT
         teacher_labels: Optional[torch.LongTensor] = None, # AVT
         student_alignment_poss: Optional[List[List]] = None, # AVT
@@ -2068,8 +2066,8 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            pixel_values=pixel_values,
-            image_grid_thw=image_grid_thw,
+            pixel_values=user_pixel_values,
+            image_grid_thw=user_image_grid_thw,
             pixel_values_latent=None, # Ours (Latent Tokens)
             image_grid_thw_latent=None,  # Ours (Latent Tokens)
             generate_mode=generate_mode,
@@ -2084,10 +2082,10 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            pixel_values=pixel_values,
-            image_grid_thw=image_grid_thw,
-            pixel_values_latent=teacher_pixel_values, # Ours (Latent Tokens)
-            image_grid_thw_latent=teacher_image_grid_thw,  # Ours (Latent Tokens)
+            pixel_values=user_assistant_pixel_values,
+            image_grid_thw=user_assistant_image_grid_thw,
+            pixel_values_latent=None, #teacher_pixel_values, # Ours (Latent Tokens)
+            image_grid_thw_latent=None, #teacher_image_grid_thw,  # Ours (Latent Tokens)
             generate_mode=generate_mode,
             latent_hidden_states=latent_hidden_states,  # Ours (Latent Tokens)
         )
@@ -2102,7 +2100,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            image_grid_thw=image_grid_thw,
+            image_grid_thw=user_image_grid_thw,
             video_grid_thw=video_grid_thw,
             rope_deltas=rope_deltas,
             cache_position=cache_position,
@@ -2110,6 +2108,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             generate_mode=generate_mode
         )
         
+
         teacher_output = self.forward_gt_image_embeds(
             input_ids=teacher_input_ids,
             attention_mask=teacher_attention_mask,
@@ -2117,11 +2116,11 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             past_key_values=past_key_values,
             inputs_embeds=teacher_inputs_embeds,
             labels=teacher_labels,
-            use_cache=use_cache,
+            use_cache=False,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            image_grid_thw=image_grid_thw,
+            image_grid_thw=user_assistant_image_grid_thw,
             video_grid_thw=video_grid_thw,
             rope_deltas=rope_deltas,
             cache_position=cache_position,
@@ -2131,14 +2130,14 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         
         return Qwen2_5_VLCausalLMOutputAVT(
             loss=student_output.loss + teacher_output.loss,
-            #student_loss=student_output.loss,
+            student_loss=student_output.loss,
             student_logits=student_output.logits,
             student_past_key_values=student_output.past_key_values,
             student_hidden_states=student_output.hidden_states,
             student_attentions=student_output.attentions,
             student_rope_deltas=student_output.rope_deltas,
             student_inputs_embeds=student_inputs_embeds,
-            #teacher_loss=teacher_output.loss,
+            teacher_loss=teacher_output.loss,
             teacher_logits=teacher_output.logits,
             teacher_past_key_values=teacher_output.past_key_values,
             teacher_hidden_states=teacher_output.hidden_states,
