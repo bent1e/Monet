@@ -12,12 +12,14 @@ from transformers import AutoTokenizer,AutoProcessor
 from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
 import gc
+import math
+from PIL import Image
 ####################################################################################################################
 
 # quick setup of the parameters
 # model setup
 max_model_len = 8192
-max_num_seqs = 512 # processing speed
+max_num_seqs = 1021 # processing speed
 #tp = 4
 temperature = 0.1
 top_k = 50
@@ -143,7 +145,7 @@ def vllm_mllm_process_batch_from_messages(messages: List[List[dict]], processor)
     assert isinstance(messages, list) and all(isinstance(msg, list) for msg in messages), "messages should be a list of lists"
     vllm_inputs = []
 
-    for msg in tqdm(messages, total=len(messages), desc="Processing vllm inputs..."):                # 逐条对话处理
+    for msg in tqdm(messages, total=len(messages), desc="Processing vllm inputs"):                # 逐条对话处理
         prompt = processor.apply_chat_template(
             msg,
             tokenize=False,
@@ -152,6 +154,8 @@ def vllm_mllm_process_batch_from_messages(messages: List[List[dict]], processor)
 
         # 针对这一条对话提取所有图像 (列表)
         image_inputs, _ = process_vision_info(msg, return_video_kwargs=False)
+
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs)
 
         # 若模板里没占位符而 image_inputs 非空，可手动补：
         if image_inputs and ("<image>" not in prompt and "<im_start>" not in prompt):
@@ -237,6 +241,40 @@ def count_qwen_vl_tokens(vllm_inputs: Dict, tokenizer, processor) -> int:
         lens.append(n_text + n_img)
     return lens
 
+
+PATCH=28
+def resize_by_token_budget(images,
+                           global_max_pixels=3840*PATCH*PATCH,
+                           per_img_max_pixels=1280*PATCH*PATCH,
+                           divisor=PATCH):
+    """等比缩放，保证一条样本内所有图像像素和 ≤ global_max_pixels"""
+    # 1) 统计原总像素
+    
+    total = sum(img.width * img.height for img in images)
+    if total <= global_max_pixels:
+        return images, None   # 大多数样本会直接返回
+
+    # 2) 统一缩放系数
+    ratio = math.sqrt(global_max_pixels / total)
+
+    processed = []
+    new_sizes = []
+    for img in images:
+        w, h = int(img.width * ratio), int(img.height * ratio)
+        # 保证能被 28 整除（Qwen 的 patch 大小）
+        w = max(divisor, (w // divisor) * divisor)
+        h = max(divisor, (h // divisor) * divisor)
+
+        # 3) 仍然超过单张上限时再单独缩放
+        if w * h > per_img_max_pixels:
+            r = math.sqrt(per_img_max_pixels / (w * h))
+            w = max(divisor, int(w * r) // divisor * divisor)
+            h = max(divisor, int(h * r) // divisor * divisor)
+
+        processed.append(img.resize((w, h), Image.BICUBIC))
+        new_sizes.append((w, h))
+    return processed, new_sizes
+
 ##########################################################################################
 # LLM
 ##########################################################################################
@@ -299,7 +337,7 @@ def vllm_generate(
 ):
     if not inputs: return []
     
-    outputs = engine.generate(inputs, sampling_params=sampling_params)   
+    outputs = engine.generate(inputs, sampling_params=sampling_params, use_tqdm=True)   
     return outputs
 
 
@@ -311,3 +349,10 @@ def vllm_kill_model(model: LLM):
     del model
     gc.collect()
     torch.cuda.empty_cache()
+
+def vllm_wake_model(model: LLM):
+    """
+    Wake up a sleeping vLLM model.
+    """
+    model.wake_up()
+    return model

@@ -109,19 +109,19 @@ DEFAULT_DATASETS = {
         "dataset_images_root": "/data1/qxwang/datasets/multimodal/VTS",
     },
     "Zebra_CoT_visual_search": {
-        "dataset_path": "/data1/qxwang/datasets/multimodal/Zebra-CoT/2D Visual Reasoning - Visual Search",
+        "dataset_path": "/home/dids/shiyang/datasets/Zebra-CoT/2D Visual Reasoning - Visual Search",
         "dataset_images_root": "",
     },
     "Zebra_CoT_geometry": {
-        "dataset_path": "/ytech_m2v5_hdd/workspace/kling_mm/Datasets/Zebra-CoT/Scientific Reasoning - Geometry",
+        "dataset_path": "/home/dids/shiyang/datasets/Zebra-CoT/Scientific Reasoning - Geometry",
         "dataset_images_root": "",
     },
     "Zebra_CoT_physics": {
-        "dataset_path": "/ytech_m2v5_hdd/workspace/kling_mm/Datasets/Zebra-CoT/Scientific Reasoning - Physics",
+        "dataset_path": "/home/dids/shiyang/datasets/Zebra-CoT/Scientific Reasoning - Physics",
         "dataset_images_root": "",
     },
     "Zebra_CoT_maze": {
-        "dataset_path": "/ytech_m2v5_hdd/workspace/kling_mm/Datasets/Zebra-CoT/Visual Logic & Strategic Games - Maze",
+        "dataset_path": "/home/dids/shiyang/datasets/Zebra-CoT/Visual Logic & Strategic Games - Maze",
         "dataset_images_root": "",
     },
 }
@@ -784,7 +784,7 @@ def parse_zebra_cot(
         return steps
 
     def _get_img_key(step: str) -> Optional[str]:
-        match = re.search(r"<image_start>\[(reasoning_image_\d+)\]<image_end>", step)
+        match = re.search(r"<image_start>\[(reasoning_image_\d+|problem_image_\d+)\]<image_end>", step)
         if match:
             return match.group(1)
         return None
@@ -796,9 +796,19 @@ def parse_zebra_cot(
             step,
         )
 
-    question = sample["Question"].replace(
-        " <image_start>[problem_image_1]<image_end>", ""
-    )
+    def _remove_question_img_pad(txt: str) -> str:
+        # (?s) = DOTALL，让 . 匹配换行
+        pattern = (
+            r'(?s)(?<=\.\s{1})'   # 可变长向后断言：定位在 ".␠␠" 之后
+            r'.*?:\n'             # 非贪婪地吃掉直到最近 ":\n"（含它）
+            r'<image_start>\[problem_image_1\]<image_end>'  # 图片标签
+        )
+        txt = re.sub(pattern, '', txt)  # 直接整段清空
+        txt = re.sub(r'<image_start>\[problem_image_1\]<image_end>', '', txt)
+        return txt
+    question = _remove_question_img_pad(sample["Question"])
+    
+    
     cot = sample["Text Reasoning Trace"]
     steps = _split_cot_by_thought(cot)
     helpers = []
@@ -913,7 +923,7 @@ def run_policy_batch(
         kept_inputs = [inp for inp, k in zip(inputs, keep_mask) if k]
         if kept_inputs:
             outputs = policy_mllm.generate(
-                kept_inputs, sampling_params=sampling_params, use_tqdm=False
+                kept_inputs, sampling_params=sampling_params, use_tqdm=True
             )
         else:
             outputs = []
@@ -1040,7 +1050,7 @@ def main():
         with open(dataset_path, "r", encoding="utf-8") as f:
             samples = json.load(f)
     else:
-        if args.dataset_name == "Zebra_CoT_visual_search":
+        if "Zebra_CoT" in args.dataset_name:
             data_root = ds_cfg["dataset_path"]
             samples = load_dataset(
                 "parquet",  # 数据格式

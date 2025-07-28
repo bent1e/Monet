@@ -5,5 +5,5 @@ qwen_vl_utils
 mathruler
 pylatexenc
 Pillow
-vllm==0.8.5
+vllm>0.7.2
 torchvision

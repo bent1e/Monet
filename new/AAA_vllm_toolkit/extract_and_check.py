@@ -297,6 +297,9 @@ def llm_batch_judge(preds, gts, llm, questions):
     llm_judge_responses = llm.generate(prompts, sampling_params=sampling_params)
 
     for i, (llm_judge_resp, pred, gt) in tqdm(enumerate(zip(llm_judge_responses, preds, gts)), total=len(prompts), desc="Judging predictions"):
+        if pred is None:
+            results.append(0)
+            continue
         judge_text = llm_judge_resp.outputs[0].text.strip()
         if judge_text == "1":
             results.append(1)

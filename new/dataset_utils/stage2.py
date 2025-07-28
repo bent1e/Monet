@@ -44,6 +44,7 @@ from AAA_vllm_toolkit.load_and_gen_vllm import (
     vllm_mllm_process_batch_from_messages,
     count_qwen_vl_tokens,
     vllm_kill_model,
+    vllm_wake_model,
     vllm_llm_init
 )
 from AAA_vllm_toolkit.extract_and_check import (
@@ -177,7 +178,8 @@ def run_batch_step(
     tokenizer,
     token_limit: int,
     sampling_params,
-    judge_llm_dir=None
+    judge_llm_dir=None,
+    judge_llm_tensor_parallel_size=2
 ) -> List[Dict[str,Any]]:
     """批量处理 recs 在 step_idx 下的 strong 推理。"""
     def _has_image(conv):
@@ -276,11 +278,17 @@ def run_batch_step(
         judge_choices.append(recs[rec_i].get("gt_choices"))
         judge_map.append(k)
 
+    judge_llm_initailized = False
     if judge_preds:
         try:
             if judge_llm_dir is not None:
-                judge_llm, _ = vllm_llm_init(judge_llm_dir, tp=args.judge_llm_tensor_parallel_size)
+                if not judge_llm_initailized:
+                    judge_llm, _ = vllm_llm_init(judge_llm_dir, tp=judge_llm_tensor_parallel_size)
+                else:
+                    judge_llm = vllm_wake_model(judge_llm)
+                judge_llm_initailized = True
                 flags = llm_batch_judge(judge_preds, judge_gt, judge_llm, questions)
+                vllm_kill_model(judge_llm)
             else:
                 #flags = batch_judge(judge_preds, judge_gt, judge_choices, questions=questions if len(questions)>0 else None, llm=judge_llm)
                 flags = quick_batch_judge(judge_preds, judge_gt, judge_choices)
@@ -310,6 +318,8 @@ def run_batch_step(
                 "token_count": None,
                 "truncated": False,
             })
+    
+    vllm_wake_model(model)
     return ret_full
 
 
@@ -388,7 +398,7 @@ def main():
         print(f"[Stage2] step{step_idx}: {len(active_idx)} active")
         for ch in chunks:
             batch_recs = [state[i]['rec'] for i in ch]
-            res_list = run_batch_step(batch_recs, step_idx, model, processor, tokenizer, args.token_limit, sampling_params, judge_llm_dir=args.judge_llm_dir)
+            res_list = run_batch_step(batch_recs, step_idx, model, processor, tokenizer, args.token_limit, sampling_params, judge_llm_dir=args.judge_llm_dir, judge_llm_tensor_parallel_size=args.judge_llm_tensor_parallel_size)
             # 写回
             for loc_i, st_idx in enumerate(ch):
                 st = state[st_idx]
