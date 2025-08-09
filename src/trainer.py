@@ -1,8 +1,11 @@
 from trl import SFTTrainer, SFTConfig
+from transformers import TrainerCallback
+import logging
 import torch
 import os, csv, torch, datetime
 import gc
 import numpy as np
+from .utils import SFTRepAnalyzer
 
 class CustomTrainerStage1(SFTTrainer):
         
@@ -163,6 +166,18 @@ class CustomTrainerSFT(SFTTrainer):
         self.exp_name =kwargs.pop('exp_name')
         super().__init__(*args, **kwargs)
         self.weight = 1.0
+        # Representation analysis
+        self.rep_analyzer = None
+        args_cfg = self.args
+        if getattr(args_cfg, 'sft_analysis_enable', False):
+            self.rep_analyzer = SFTRepAnalyzer(
+                save_dir=args_cfg.sft_analysis_save_dir,
+                categories=args_cfg.sft_analysis_categories,
+                save_baseline=args_cfg.sft_analysis_save_baseline
+            )
+            if getattr(self, 'is_main_process', True):
+                logging.info(f"[SFT Analysis] Analyzer initialized. Save dir={args_cfg.sft_analysis_save_dir}; Categories={args_cfg.sft_analysis_categories}; Save baseline={args_cfg.sft_analysis_save_baseline}")
+            # subset selection deferred to training loop external orchestration
         # 仅 rank‑0 进程写文件，防止多卡重复
         self.is_main_process = (
             not torch.distributed.is_initialized()
@@ -195,9 +210,43 @@ class CustomTrainerSFT(SFTTrainer):
         inputs['pixel_values'] = inputs['user_assistant_pixel_values']
         inputs['image_grid_thw'] = inputs['user_assistant_image_grid_thw']
         inputs['labels'] = inputs['teacher_labels']
+        # Collect available position categories dynamically (supports non_observation_poss)
+        poss_dict = {}
+        for k in ['boxed_start_poss','observation_poss','non_observation_poss']:
+            if k in inputs:
+                poss_dict[k] = inputs[k]
+        inputs['sft_analysis_poss'] = poss_dict
         (teacher_ce_loss, teacher_outputs) = super().compute_loss(
                 model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
             )
+
+        # Representation analysis update
+        if self.rep_analyzer is not None and 'sample_id' in inputs:
+            with torch.no_grad():
+                sample_ids = inputs['sample_id']  # assume shape (B,)
+                hidden_states = teacher_outputs.hidden_states  # list[L] each (B,S,H)
+                if hidden_states is not None:
+                    for b, sid in enumerate(sample_ids):
+                        sid_int = int(sid)
+                        if self.rep_analyzer.is_tracked(sid_int):
+                            # positions dict from inputs['sft_analysis_poss'] per sample index b
+                            poss_all = inputs.get('sft_analysis_poss', {})
+                            # expect each value is List[List[int]] of length B
+                            pos_dict = {}
+                            for cat, batch_poss in poss_all.items():
+                                if isinstance(batch_poss, (list, tuple)) and len(batch_poss) > b:
+                                    pos_dict[cat] = batch_poss[b]
+                            # Build baseline lazily first time
+                            if sid_int not in self.rep_analyzer.baseline:
+                                self.rep_analyzer.build_baseline(sid_int, [h[[b]] for h in hidden_states])
+                            # Update current cos
+                            self.rep_analyzer.update(
+                                sample_id=sid_int,
+                                hidden_states=[h[[b]] for h in hidden_states],
+                                pos_dict=pos_dict,
+                                epoch=int(self.state.epoch if self.state.epoch is not None else 0),
+                                global_step=int(self.state.global_step)
+                            )
 
         outputs_teacher_loss = teacher_ce_loss.item()
 
@@ -218,3 +267,26 @@ class CustomTrainerSFT(SFTTrainer):
         
         
         return (teacher_ce_loss, None) if return_outputs else teacher_ce_loss
+
+    def on_epoch_end(self):
+        # 注意：HF Trainer 不会自动调用子类自定义的 on_epoch_end；实际汇总通过回调实现。
+        return super().on_epoch_end()
+
+
+import weakref
+
+class RepSummaryCallback(TrainerCallback):
+    """Epoch 结束时汇总表示相似度。使用 weakref 保存 trainer 引用，避免循环引用。"""
+    def __init__(self, trainer):
+        self._trainer_ref = weakref.ref(trainer)
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        trainer = self._trainer_ref()
+        if trainer is None:
+            return control
+        analyzer = getattr(trainer, 'rep_analyzer', None)
+        if analyzer is not None and getattr(trainer, 'is_main_process', True):
+            ep = int(state.epoch)-1 if state.epoch is not None else 0
+            analyzer.finalize_epoch(ep)
+            logging.info(f"[SFT Analysis] Epoch {ep} summary written.")
+        return control

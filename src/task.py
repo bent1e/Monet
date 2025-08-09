@@ -111,31 +111,18 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
     Preprocess function for AVT with single input images.
     """
     conversations = sample
-    is_VTS=False
+
     # Process image loading for all steps first
     for i, step in enumerate(conversations):
         new_step = step.copy()
         if step["role"] == "system":
             new_step["content"][0]["text"] = "You are a helpful assistant."
-        for j, content in enumerate(new_step["content"]):
-            if new_step["role"] == "assistant" and is_VTS:
-                if j==len(new_step["content"])-1:
-                    if content["type"] == "image":
-                        continue
-                if j==len(new_step["content"])-2:
-                    if content["type"] == "text" and new_step["content"][j+1]["type"] == "image":
-                        s = content["text"].find("<abs_vis_token></abs_vis_token>")
-                        lat = content["text"][s+len("<abs_vis_token></abs_vis_token>"):].replace("<observation>","").replace("</observation>","") if s!=-1 else ""
-                        prev = content["text"][:s] if s!=-1 else content["text"]
-                        content["text"] = prev + lat
-                        
+        for j, content in enumerate(new_step["content"]):        
             if content["type"] == "image":
-                if "VTS" in content["image_file_name"]:
-                    is_VTS=True
                 content["image"] = os.path.join(dataset_root,content.pop("image_file_name")) 
                 if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
-                        new_step["content"][j-1]["text"] += "<abs_vis_token></abs_vis_token>"
+                        return None
             
             new_step["content"][j] = content
         conversations[i] = new_step

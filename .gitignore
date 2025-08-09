@@ -1,6 +1,7 @@
 new/created_dataset/
 new/data_utils/debug_output/
 checkpoints/
+sft_analysis/
 
 wandb
 

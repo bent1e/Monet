@@ -1,6 +1,6 @@
 import torch
 import logging
-
+import os
 import numpy as np
 import json
 import random
@@ -37,6 +37,21 @@ def get_args():
     parser.add_argument("--add_reflection", action='store_true', default=False, help="Whether to add reflection in the assistant's response.")
     parser.add_argument("--alignment", type=str, default="observation_end", choices=["observation_end", "boxed_start", "observation_all"], help="The alignment strategy for AVT.")
     parser.add_argument("--dataset_root", type=str, default="./new", help="Root directory for the dataset.")
+    # ===== SFT representation analysis related arguments =====
+    parser.add_argument("--sft_analysis_enable", action='store_true', default=False,
+                        help="Enable tracking cosine similarity between baseline (pre-SFT) and current hidden states on a sampled subset.")
+    parser.add_argument("--sft_analysis_ratio", type=float, default=0.02,
+                        help="Proportion (0~1] of the whole training dataset to sample for representation analysis. Ignored if disable.")
+    parser.add_argument("--sft_analysis_seed", type=int, default=1234,
+                        help="Random seed for sampling analysis subset.")
+    parser.add_argument("--sft_analysis_max_samples", type=int, default=500,
+                        help="Maximum number of samples to track even if ratio yields more.")
+    parser.add_argument("--sft_analysis_save_dir", type=str, default="./sft_analysis",
+                        help="Directory to save analysis artifacts (subset ids, per-epoch cosine stats).")
+    parser.add_argument("--sft_analysis_categories", type=str, nargs='+', default=["boxed_start_poss","observation_poss"],
+                        help="Token position categories to aggregate: boxed_start_poss, observation_poss, non_observation_poss.")
+    parser.add_argument("--sft_analysis_save_baseline", action='store_true', default=False,
+                        help="If set, persist baseline hidden states (may be large). Otherwise only keep in memory.")
     return parser.parse_args()
 
 def seed_everything(seed: int = 42):
@@ -547,7 +562,187 @@ def resize_by_token_budget(images,
     return processed, new_sizes
 
 
+def resize_by_token_budget_sample_wise(images_per_sample,
+                                       global_max_pixels=1280*3*28*28,
+                                       per_img_max_pixels=1280*28*28,
+                                       divisor=28):
+    """逐样本等比缩放，每个样本单独满足像素预算。
+
+    参数:
+      images_per_sample: List[List[PIL.Image]] 按样本分组的图像列表。
+      global_max_pixels: 单个样本内所有图片像素和的上限（默认与批量版一致）。
+      per_img_max_pixels: 单张图片像素上限。
+      divisor: 宽高需能被该值整除（Qwen 使用 28）。
+
+    返回:
+      processed_per_sample: List[List[PIL.Image]] 与输入结构一致的已缩放图像。
+      new_sizes_per_sample: List[List[Tuple[int,int]]] 对应的新尺寸；若样本无需缩放则给出按同样逻辑得到的尺寸（与原尺寸一致）。
+    """
+    processed_per_sample = []
+    sizes_per_sample = []
+
+    for imgs in images_per_sample:
+        if len(imgs) == 0:
+            processed_per_sample.append([])
+            sizes_per_sample.append([])
+            continue
+
+        total = sum(img.width * img.height for img in imgs)
+        # 不需要缩放
+        if total <= global_max_pixels:
+            processed = []
+            new_sizes = []
+            for img in imgs:
+                # 仍需确保尺寸可被 divisor 整除，否则下游 patch 数可能不一致
+                w = max(divisor, (img.width // divisor) * divisor)
+                h = max(divisor, (img.height // divisor) * divisor)
+                if w != img.width or h != img.height:
+                    processed.append(img.resize((w, h), Image.BICUBIC))
+                else:
+                    processed.append(img)
+                new_sizes.append((w, h))
+            processed_per_sample.append(processed)
+            sizes_per_sample.append(new_sizes)
+            continue
+
+        # 需要按样本统一缩放系数
+        ratio = math.sqrt(global_max_pixels / total)
+        processed = []
+        new_sizes = []
+        for img in imgs:
+            w, h = int(img.width * ratio), int(img.height * ratio)
+            w = max(divisor, (w // divisor) * divisor)
+            h = max(divisor, (h // divisor) * divisor)
+
+            # 仍然超过单张上限时再单独缩放
+            if w * h > per_img_max_pixels:
+                r = math.sqrt(per_img_max_pixels / (w * h))
+                w = max(divisor, int(w * r) // divisor * divisor)
+                h = max(divisor, int(h * r) // divisor * divisor)
+
+            processed.append(img.resize((w, h), Image.BICUBIC))
+            new_sizes.append((w, h))
+
+        processed_per_sample.append(processed)
+        sizes_per_sample.append(new_sizes)
+
+    return processed_per_sample, sizes_per_sample
+
+
 
 if __name__=="__main__":
     
     pass
+
+# ================= SFT representation analysis helpers =================
+class SFTRepAnalyzer:
+    """Track cosine similarity between baseline and current hidden states for selected samples & token positions.
+
+    Usage lifecycle:
+      analyzer = SFTRepAnalyzer(save_dir, categories, save_baseline)
+      subset_ids = analyzer.select_subset(total_size, ratio, max_samples, seed)
+      (Before training) for each tracked sample run base model with output_hidden_states=True and call build_baseline(sample_id, hidden_states)
+      (During training) call update(sample_id, hidden_states, pos_dict, epoch, global_step)
+      (End epoch) call finalize_epoch(epoch)
+    """
+    def __init__(self,
+                 save_dir: str,
+                 categories: List[str],
+                 save_baseline: bool = False):
+        self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        self.categories = categories
+        self.save_baseline_flag = save_baseline
+        self.subset_ids: List[int] = []
+        self.baseline: dict[int, torch.Tensor] = {}  # id -> (num_layers, seq, hidden)
+        self.layer_count: int = 0
+        self.per_epoch_records: dict[int, dict] = {}
+
+    def select_subset(self, total_size: int, ratio: float, max_samples: int, seed: int):
+        import math, random, json
+        rng = random.Random(seed)
+        k = min(max_samples, max(1, int(math.ceil(total_size * ratio))))
+        self.subset_ids = sorted(rng.sample(range(total_size), k))
+        with open(os.path.join(self.save_dir, 'subset_ids.json'), 'w') as f:
+            json.dump(self.subset_ids, f)
+        return self.subset_ids
+
+    def is_tracked(self, sample_id: int) -> bool:
+        return sample_id in self.subset_ids
+
+    def build_baseline(self, sample_id: int, hidden_states: List[torch.Tensor]):
+        if sample_id not in self.subset_ids:
+            return
+        if hidden_states is None or len(hidden_states) == 0:
+            logging.warning(f"[SFT Analysis] Empty hidden_states when building baseline for sample {sample_id}; skipping.")
+            return
+        try:
+            stacked = torch.stack([h[0].detach().cpu() for h in hidden_states], dim=0)  # (L,S,H)
+        except Exception as e:
+            logging.error(f"[SFT Analysis] Failed stacking baseline hidden states for sample {sample_id}: {e}")
+            return
+        self.layer_count = stacked.shape[0]
+        if self.save_baseline_flag:
+            os.makedirs(os.path.join(self.save_dir, 'baseline_reps'), exist_ok=True)
+            torch.save(stacked, os.path.join(self.save_dir, 'baseline_reps', f'baseline_{sample_id}.pt'))
+        self.baseline[sample_id] = stacked
+
+    @staticmethod
+    def _gather_positions(hidden_layers: torch.Tensor, positions: List[int]) -> torch.Tensor:
+        if len(positions)==0:
+            return torch.empty(hidden_layers.size(0), 0, hidden_layers.size(-1))
+        pos_tensor = torch.tensor(positions, dtype=torch.long)
+        return hidden_layers[:, pos_tensor, :]
+
+    def update(self, sample_id: int, hidden_states: List[torch.Tensor], pos_dict: dict, epoch: int, global_step: int):
+        if sample_id not in self.baseline:
+            return
+        current = torch.stack([h[0].detach().cpu() for h in hidden_states], dim=0)
+        base = self.baseline[sample_id]
+        record = { 'epoch': epoch, 'step': global_step, 'sample_id': sample_id }
+        for cat in self.categories:
+            poss = pos_dict.get(cat, [])
+            if len(poss)==0:
+                continue
+            cur_sel = self._gather_positions(current, poss)
+            base_sel = self._gather_positions(base, poss)
+            if cur_sel.numel()==0:
+                continue
+            cur_norm = cur_sel / (cur_sel.norm(dim=-1, keepdim=True) + 1e-6)
+            base_norm = base_sel / (base_sel.norm(dim=-1, keepdim=True) + 1e-6)
+            cos = (cur_norm * base_norm).sum(dim=-1)  # (L,P)
+            layer_mean = cos.mean(dim=-1)  # (L)
+            overall_mean = cos.mean().item()
+            record[f'{cat}_layer_mean'] = layer_mean.tolist()
+            record[f'{cat}_overall_mean'] = overall_mean
+        self.per_epoch_records.setdefault(epoch, {'samples': []})['samples'].append(record)
+
+    def finalize_epoch(self, epoch: int):
+        import json
+        if epoch not in self.per_epoch_records:
+            return
+        ep_data = self.per_epoch_records[epoch]
+        samples = ep_data['samples']
+        summary = {}
+        for cat in self.categories:
+            layer_accumulator = []
+            count = 0
+            for rec in samples:
+                key = f'{cat}_layer_mean'
+                if key in rec:
+                    if not layer_accumulator:
+                        layer_accumulator = [0.0]*len(rec[key])
+                    for i,v in enumerate(rec[key]):
+                        layer_accumulator[i]+=v
+                    count+=1
+            if count>0:
+                summary[f'{cat}_layer_mean_avg'] = [v/count for v in layer_accumulator]
+        summary['num_samples_with_cat'] = {cat: sum(1 for rec in samples if f'{cat}_layer_mean' in rec) for cat in self.categories}
+        out = {'epoch': epoch, 'summary': summary, 'samples': samples}
+        out_path = os.path.join(self.save_dir, f'epoch_{epoch}_rep_analysis.json')
+        with open(out_path, 'w') as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        logging.info(f"[SFT Analysis] Saved epoch {epoch} rep analysis to {out_path}; samples={len(samples)}")
+
+    def save_state(self):
+        torch.save({'subset_ids': self.subset_ids}, os.path.join(self.save_dir, 'state.pt'))

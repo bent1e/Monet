@@ -1205,6 +1205,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         teacher_hidden_states_for_alignment: Optional[List[List[torch.Tensor]]] = None, # for the latent forward
         ce_patch_pos: Optional[List[List[int]]] = None, 
         ce_patch_vec: Optional[List[torch.Tensor]] = None,
+        sft_analysis_poss: Optional[dict] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
         r"""
@@ -1618,14 +1619,16 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             )
 
             hidden_states_to_return = []
-            if alignment_poss is not None:
+            if alignment_poss is not None: # distill
                 for i, hidden_states in enumerate(outputs.hidden_states):
                     # hidden_state: (batch_size, seq_len, hidden_dim)
                     hidden_states_per_layer = []
                     for b in range(hidden_states.shape[0]):
                         hidden_states_per_layer.append(hidden_states[b, alignment_poss[b], :])
                     hidden_states_to_return.append(hidden_states_per_layer)
-
+            else: # sft analysis
+                hidden_states_to_return = outputs.hidden_states
+                
             output = Qwen2_5_VLModelOutputWithPast(
                 last_hidden_state=outputs.last_hidden_state,
                 past_key_values=outputs.past_key_values,

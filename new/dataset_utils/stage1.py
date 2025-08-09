@@ -901,7 +901,7 @@ def parse_vts(
                 if "Extracted text:" in user_content:
                     user_content = user_content.replace("<image>", "")
                     add_use_content_as_next_helper_step = True
-                user_img_cnt = messages[i+1]["content"].count("<image>")
+                user_img_cnt = user_content.count("<image>")
                 if user_img_cnt == 0:
                     helper_img = None 
                 else:
@@ -912,9 +912,12 @@ def parse_vts(
                     if user_img_cnt == 0:
                         helper_img = None
                     else:
-                        helper_img = Image.open(
-                            dataset_images_root / images[img_ptr]
-                        ).convert("RGB")
+                        if "Extracted text:" in user_content: # the image in the OCR step is the original image, so we don't need it as the helper image
+                            helper_img = None
+                        else:
+                            helper_img = Image.open(
+                                dataset_images_root / images[img_ptr]
+                            ).convert("RGB")
                     img_ptr += user_img_cnt
             
             step_text = content_dict["thought"]
