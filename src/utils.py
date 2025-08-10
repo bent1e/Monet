@@ -29,7 +29,7 @@ def get_args():
     parser.add_argument("--data_path", type=str, default='PathToJsonlData', nargs='+')    
     parser.add_argument("--log_file", type=str, default='./log.txt')
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/model_stage1')
-
+    parser.add_argument("--resume_from_checkpoint", default=False, action="store_true")
     #parser.add_argument("--devices", type=str, nargs='+', default=['cuda:0'])
 
     parser.add_argument("--add_reflection", action='store_true', default=False, help="Whether to add reflection in the assistant's response.")
@@ -50,6 +50,9 @@ def get_args():
                         help="Token position categories to aggregate: boxed_start_poss, observation_poss, non_observation_poss.")
     parser.add_argument("--sft_analysis_save_baseline", action='store_true', default=False,
                         help="If set, persist baseline hidden states (may be large). Otherwise only keep in memory.")
+    # DeepSpeed config path (optional). If provided, Trainer will enable DeepSpeed with this config.
+    parser.add_argument("--deepspeed", type=str, default="",
+                        help="Path to DeepSpeed config JSON, e.g., ./deepspeed/ds_zero2_cpu_offload.json")
     return parser.parse_args()
 
 def seed_everything(seed: int = 42):
@@ -529,7 +532,7 @@ def mask_image_output_tokens(
 
 def resize_by_token_budget(images,
                            global_max_pixels=640*3*28*28,
-                           per_img_max_pixels=640*28*28,
+                           per_img_max_pixels=800*28*28,
                            divisor=28):
     """等比缩放，保证一条样本内所有图像像素和 ≤ global_max_pixels"""
     # 1) 统计原总像素
@@ -561,8 +564,8 @@ def resize_by_token_budget(images,
 
 
 def resize_by_token_budget_sample_wise(images_per_sample,
-                                       global_max_pixels=320*3*28*28,
-                                       per_img_max_pixels=320*28*28,
+                                       global_max_pixels=640*3*28*28,
+                                       per_img_max_pixels=640*28*28,
                                        divisor=28):
     """逐样本等比缩放，每个样本单独满足像素预算。
 

@@ -42,7 +42,14 @@ cache_dir = '/home/dids/shiyang/datasets/cache_dir'
 os.environ['HF_HOME'] = cache_dir
 
 patch=14 # processor.image_processor.patch_size
-processor = AutoProcessor.from_pretrained(args.model)
+# Use slow processor to avoid fast-processor info spam and behavioral drift
+processor = AutoProcessor.from_pretrained(args.model, use_fast=False)
+if _rank == 0:
+    # Rewrite deprecated preprocessor.json into video_preprocessor.json by re-saving once
+    try:
+        processor.save_pretrained(args.model)
+    except Exception as _e:
+        logging.debug(f"Processor save_pretrained skip: {_e}")
 
 if args.stage in ['stage1', 'stage2']:
     processor.tokenizer.add_tokens("<|latent_pad|>", special_tokens=True)
@@ -59,6 +66,13 @@ config = Qwen2_5_VLConfig.from_pretrained(args.load_model_path)
 config.compress_strategy = args.compress_strategy
 config.latent_size = args.latent_size
 config.stage = args.stage
+# Avoid `use_cache=True` with gradient checkpointing warnings; training doesn't need cache
+config.use_cache = False
+# Some Qwen configs carry an unrecognized `loss_type=None` which triggers a warning; set explicitly
+try:
+    setattr(config, 'loss_type', 'ForCausalLMLoss')
+except Exception:
+    pass
 
 if args.stage in ['stage1', 'avt_stage1'] or (args.stage == 'avt_sft' and args.sft_analysis_enable):
     config.output_hidden_states = True
@@ -76,6 +90,37 @@ model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
     config=config,
     torch_dtype=torch.bfloat16,
 )
+
+# Prefer non-reentrant checkpointing to avoid requires_grad warnings (when enabled)
+# Enable gradient checkpointing only on the LM/backbone (not on the frozen visual tower)
+try:
+    if args.stage != "avt_stage1":
+        # Always disable global GC first to avoid touching the visual branch
+        model.gradient_checkpointing_disable()
+
+        gc_kwargs = {"use_reentrant": False}
+
+        enabled = False
+        # Qwen2.5-VL commonly exposes the backbone under one of these attributes
+        for attr in ["language_model", "transformer", "model"]:
+            sub = getattr(model, attr, None)
+            if sub is not None and hasattr(sub, "gradient_checkpointing_enable"):
+                sub.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gc_kwargs)
+                enabled = True
+                break
+
+        # Fallback: if we didn't find a known submodule, skip enabling to avoid useless warnings
+        if not enabled:
+            logging.warning("Could not locate LM backbone to enable gradient checkpointing; leaving it disabled.")
+
+        # Make sure embeddings create grads for checkpointed layers
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+
+        # HF requires use_cache=False when GC is on (you already set it above)
+        model.config.use_cache = False
+except Exception as _e:
+    logging.debug(f"Selective gradient checkpointing skipped: {_e}")
 
 if args.stage in ['stage1']: model.resize_token_embeddings(len(processor.tokenizer))
 
@@ -439,6 +484,9 @@ elif args.stage == 'avt_sft':
     CustomTrainer = CustomTrainerSFT
     collate_fn = partial(collate_fn_avt_sft)
 # 
+if args.deepspeed != "":
+    print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
+
 training_args = SFTConfig(
     output_dir=save_dir,
     num_train_epochs=args.epochs,
@@ -461,11 +509,17 @@ training_args = SFTConfig(
     report_to=[],
     logging_dir='./logs/',
     logging_strategy='steps',
+    # Avoid FLOPs estimation logs (set to False through env if needed)
+    disable_tqdm=False,
     # DDP related
     ddp_backend="nccl",
     ddp_find_unused_parameters=False,
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
+    # Save only on global rank 0 when running multi-node
+    save_on_each_node=False,
+    # DeepSpeed config (if provided via --deepspeed)
+    deepspeed=(args.deepspeed if getattr(args, 'deepspeed', '') else None),
 )
 
 # ---- Inject custom SFT analysis flags into training_args so CustomTrainerSFT can access them ----
@@ -482,7 +536,7 @@ trainer = CustomTrainer(
     args=training_args,
     train_dataset=wrapped_dataset if args.stage=='avt_sft' else train_dataset,
     data_collator=collate_fn,
-    tokenizer=processor.tokenizer,
+    processing_class=processor,
     exp_name=exp_name,
 )
 
@@ -499,6 +553,14 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _ra
         subset_ids = analyzer.select_subset(total_size, args.sft_analysis_ratio, args.sft_analysis_max_samples, args.sft_analysis_seed)
         logging.info(f"[SFT Analysis] Selected {len(subset_ids)} samples for representation tracking.")
         mdl = trainer.model
+        # Temporarily disable gradient checkpointing during no-grad baseline pass to avoid PyTorch warnings
+        _re_enable_gc = False
+        try:
+            if getattr(mdl, 'is_gradient_checkpointing', False):
+                mdl.gradient_checkpointing_disable()
+                _re_enable_gc = True
+        except Exception:
+            pass
         mdl.eval()
         with torch.no_grad():
             bs = min(2, args.bsz)
@@ -521,7 +583,18 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _ra
                 for bi, sid in enumerate(cur_ids):
                     analyzer.build_baseline(int(sid), [h[[bi]] for h in hidden_states])
         mdl.train()
+        # Re-enable gradient checkpointing if it was enabled before
+        if _re_enable_gc:
+            try:
+                mdl.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                if hasattr(mdl, 'enable_input_require_grads'):
+                    mdl.enable_input_require_grads()
+            except Exception:
+                pass
+        # Optional: synchronize before starting training in multi-node setups
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
-trainer.train()
+trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 trainer.save_model(training_args.output_dir)
 

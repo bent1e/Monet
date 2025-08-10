@@ -164,6 +164,9 @@ class CustomTrainerAVTStage1(SFTTrainer):
 class CustomTrainerSFT(SFTTrainer):
     def __init__(self, *args, **kwargs):
         self.exp_name =kwargs.pop('exp_name')
+        # accept processing_class (preferred) and fall back to tokenizer for backward compat
+        if 'processing_class' not in kwargs and 'tokenizer' in kwargs:
+            kwargs['processing_class'] = kwargs.pop('tokenizer')
         super().__init__(*args, **kwargs)
         self.weight = 1.0
         # Representation analysis
