@@ -176,11 +176,10 @@ class CustomTrainerSFT(SFTTrainer):
             self.rep_analyzer = SFTRepAnalyzer(
                 save_dir=args_cfg.sft_analysis_save_dir,
                 categories=args_cfg.sft_analysis_categories,
-                save_baseline=args_cfg.sft_analysis_save_baseline,
                 dataset_names=self.args.dataset_names
             )
             if getattr(self, 'is_main_process', True):
-                logging.info(f"[SFT Analysis] Analyzer initialized. Save dir={args_cfg.sft_analysis_save_dir}; Categories={args_cfg.sft_analysis_categories}; Save baseline={args_cfg.sft_analysis_save_baseline}")
+                logging.info(f"[SFT Analysis] Analyzer initialized. Save dir={args_cfg.sft_analysis_save_dir}; Categories={args_cfg.sft_analysis_categories}")
             # subset selection deferred to training loop external orchestration
         # 仅 rank‑0 进程写文件，防止多卡重复
         self.is_main_process = (
@@ -289,8 +288,32 @@ class RepSummaryCallback(TrainerCallback):
         if trainer is None:
             return control
         analyzer = getattr(trainer, 'rep_analyzer', None)
-        if analyzer is not None and getattr(trainer, 'is_main_process', True):
+        if analyzer is not None:
             ep = int(state.epoch)-1 if state.epoch is not None else 0
-            analyzer.finalize_epoch(ep)
-            logging.info(f"[SFT Analysis] Epoch {ep} summary written.")
+            # Gather samples from all ranks and merge before finalizing
+            local_samples = []
+            if ep in analyzer.per_epoch_records:
+                local_samples = analyzer.per_epoch_records[ep].get('samples', [])
+
+            is_dist = hasattr(torch, 'distributed') and torch.distributed.is_available() and torch.distributed.is_initialized()
+            if is_dist:
+                rank = torch.distributed.get_rank()
+                try:
+                    world_size = torch.distributed.get_world_size()
+                    gathered = [None] * world_size
+                    # collect python objects (list of sample dicts) from all ranks
+                    torch.distributed.all_gather_object(gathered, local_samples)
+                    merged_samples = []
+                    for s in gathered:
+                        if s:
+                            merged_samples.extend(s)
+                    #print(f"rank {rank}, merged_samples {merged_samples}")
+                    analyzer.per_epoch_records[ep] = {'samples': merged_samples}
+                except Exception as e:
+                    logging.warning(f"[SFT Analysis] all_gather_object failed on epoch {ep}: {e}; fallback to rank-local summary.")
+
+            # Only main process writes file, but ensure it has merged samples
+            if (not is_dist) or torch.distributed.get_rank() == 0:
+                analyzer.finalize_epoch(ep)
+                logging.info(f"[SFT Analysis] Epoch {ep} summary written.")
         return control

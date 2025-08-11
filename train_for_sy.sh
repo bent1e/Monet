@@ -12,7 +12,6 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
   --grad_accum_steps 16 \
   --task "mm-reasoning" \
   --stage "avt_sft" \
-  --shufle_train \
   --data_path "./new/created_dataset/filtered_data/CoF/filtered_train.json" \
     "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train.json" \
     "./new/created_dataset/filtered_data/PixelReasoner/filtered_train.json" \
@@ -24,4 +23,7 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     "./new/created_dataset/filtered_data/VTS_1/filtered_train.json" \
   --log_file "./log.txt" \
   --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
-  --deepspeed ./deepspeed/ds_zero2_gpu.json 
+  --deepspeed ./deepspeed/ds_zero2_gpu.json \
+  --sft_analysis_enable \
+  --sft_analysis_ratio 0.1 \
+  --sft_analysis_categories non_observation_poss observation_poss

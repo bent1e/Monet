@@ -11,7 +11,7 @@ import logging
 from tqdm import tqdm
 from trl import SFTTrainer, SFTConfig
 from qwen_vl_utils import process_vision_info
-
+import torch.distributed as dist
 from src.utils import *
 from src.task import *
 from src.trainer import CustomTrainerStage1, CustomTrainerStage2
@@ -495,9 +495,9 @@ training_args = SFTConfig(
     warmup_steps=10,
     learning_rate=1e-5,
     weight_decay=0.01,
-    logging_steps=20,
+    logging_steps=5,
     save_strategy="steps",
-    save_steps=500,
+    save_steps=200,
     save_total_limit=3,
     optim="adamw_torch_fused",
     bf16=True,
@@ -527,7 +527,6 @@ if args.stage == 'avt_sft':
     setattr(training_args, 'sft_analysis_enable', args.sft_analysis_enable)
     setattr(training_args, 'sft_analysis_save_dir', args.sft_analysis_save_dir)
     setattr(training_args, 'sft_analysis_categories', args.sft_analysis_categories)
-    setattr(training_args, 'sft_analysis_save_baseline', args.sft_analysis_save_baseline)
     setattr(training_args, 'dataset_names', dataset_names)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
@@ -545,15 +544,92 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False):
     from src.trainer import RepSummaryCallback
     trainer.add_callback(RepSummaryCallback(trainer))
 
-# Build baseline hidden states for SFT analysis subset before training (rank0 only)
-if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _rank == 0:
+"""
+Build baseline hidden states for SFT analysis in parallel across ranks.
+Protocol:
+  - rank0 samples subset_ids and writes to analyzer.save_dir/subset_ids.json, then creates .subset_ready
+  - all ranks read the same subset_ids and take a disjoint shard to build baselines concurrently
+  - force-save baselines to disk during this phase
+  - barrier, then all ranks load full baselines from disk into memory for training-time access
+"""
+if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
     analyzer = getattr(trainer, 'rep_analyzer', None)
+    is_dist = dist.is_available() and dist.is_initialized()
+    rank = dist.get_rank() if is_dist else 0
+    world_size = dist.get_world_size() if is_dist else 1
+
     if analyzer is not None:
-        total_size = len(wrapped_dataset)
-        subset_ids = analyzer.select_subset(total_size, args.sft_analysis_ratio, args.sft_analysis_max_samples, args.sft_analysis_seed)
-        logging.info(f"[SFT Analysis] Selected {len(subset_ids)} samples for representation tracking.")
+        subset_dir = analyzer.save_dir
+        os.makedirs(subset_dir, exist_ok=True)
+        subset_file = os.path.join(subset_dir, f'subset_ids{dataset_names}.json')
+        ready_marker = os.path.join(subset_dir, f'.subset_ready{dataset_names}')
+
+        # Step 1: rank0 selects subset and signals readiness
+        if rank == 0:
+            # fresh subset each run (overwrite prior)
+            try:
+                if os.path.exists(ready_marker):
+                    os.remove(ready_marker)
+            except Exception:
+                pass
+            total_size = len(wrapped_dataset)
+            subset_ids = analyzer.select_subset(
+                total_size, args.sft_analysis_ratio, args.sft_analysis_max_samples, args.sft_analysis_seed
+            )
+            logging.info(f"[SFT Analysis] Selected {len(subset_ids)} samples for representation tracking.")
+            with open(subset_file, 'w') as f:
+                json.dump(subset_ids, f)
+                f.flush()
+                os.fsync(f.fileno())
+            with open(ready_marker, 'w') as f:
+                f.write('ready')
+
+
+        # Step 2: all ranks wait for subset_ready and read subset_ids
+        if is_dist and rank != 0:
+            import time
+            if not os.path.exists(ready_marker):
+                logging.info("[SFT Analysis] Waiting for subset ids from rank0...")
+            while not os.path.exists(ready_marker):
+                time.sleep(0.5)
+            with open(subset_file, 'r') as f:
+                subset_ids = json.load(f)
+            analyzer.set_subset(subset_ids)
+
+
+        # read subset ids
+        import json as _json
+        with open(subset_file, 'r') as f:
+            subset_ids = _json.load(f)
+
+        # Step 3: partition subset for this rank
+        def _partition(lst, r, w):
+            n = len(lst)
+            per = (n + w - 1) // w
+            start = r * per
+            end = min(n, start + per)
+            return lst[start:end]
+
+        shard_ids = _partition(subset_ids, rank, world_size)
+        logging.info(f"[SFT Analysis][rank {rank}/{world_size}] shard size={len(shard_ids)}")
+
+        # Ensure baselines are persisted to disk so every rank can load later
+        analyzer.save_baseline_flag = True
+
+        # Prepare model/device and temporarily disable gradient checkpointing
         mdl = trainer.model
-        # Temporarily disable gradient checkpointing during no-grad baseline pass to avoid PyTorch warnings
+        local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", 0)))
+
+        acc = getattr(trainer, "accelerator", None)
+        if acc is not None:
+            device = acc.device
+        else:
+            device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda":
+                torch.cuda.set_device(local_rank)
+        print(f"[rank {rank}] using device: {device}")
+        mdl.to(device)
+
         _re_enable_gc = False
         try:
             if getattr(mdl, 'is_gradient_checkpointing', False):
@@ -561,16 +637,15 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _ra
                 _re_enable_gc = True
         except Exception:
             pass
+
+        # Step 4: run baseline forward on this rank's shard
         mdl.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             bs = min(2, args.bsz)
-            for i in tqdm(range(0, len(subset_ids), bs)):
-                cur_ids = subset_ids[i:i+bs]
-                # Reconstruct mini-batch examples identical to training dataset items
-                examples = [{ 'conversation': wrapped_dataset[j]['conversation'], 'sample_id': j } for j in cur_ids]
-                batch_b = collate_fn(examples)  # uses collate_fn_avt_sft ensuring identical preprocessing & resizing
-                # Forward pass mirroring training (teacher / latent_mode False path)
-                device = getattr(mdl, 'device', torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+            for i in tqdm(range(0, len(shard_ids), bs)):
+                cur_ids = shard_ids[i:i+bs]
+                examples = [{'conversation': wrapped_dataset[j]['conversation'], 'sample_id': j} for j in cur_ids]
+                batch_b = collate_fn(examples)
                 inputs_model = {
                     'input_ids': batch_b['teacher_input_ids'].to(device),
                     'attention_mask': batch_b['teacher_attention_mask'].to(device),
@@ -579,11 +654,11 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _ra
                     'output_hidden_states': True
                 }
                 outputs = mdl(**inputs_model)
-                hidden_states = outputs.hidden_states  # list[L] each (B,S,H)
+                hidden_states = outputs.hidden_states
                 for bi, sid in enumerate(cur_ids):
                     analyzer.build_baseline(int(sid), [h[[bi]] for h in hidden_states])
+
         mdl.train()
-        # Re-enable gradient checkpointing if it was enabled before
         if _re_enable_gc:
             try:
                 mdl.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -591,9 +666,36 @@ if args.stage=='avt_sft' and getattr(args, 'sft_analysis_enable', False) and _ra
                     mdl.enable_input_require_grads()
             except Exception:
                 pass
-        # Optional: synchronize before starting training in multi-node setups
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
+
+        # Step 5: synchronize all ranks to ensure all shard baselines are saved
+        if is_dist:
+            logging.info(f"[SFT Analysis][rank {rank}] entering barrier after baseline save")
+            dist.barrier()
+            logging.info(f"[SFT Analysis][rank {rank}] passed barrier, start loading baselines")
+
+        # Step 6: load all baselines from disk to local memory for training-time updates
+        baseline_dir = os.path.join(analyzer.save_dir, f'baseline_reps_{dataset_names}')
+        if os.path.isdir(baseline_dir):
+            import glob
+            paths = glob.glob(os.path.join(baseline_dir, 'baseline_*.pt'))
+            loaded = 0
+            for p in tqdm(paths, desc=f"[rank {rank}] loading all baseline reps", total=len(paths)):
+                try:
+                    sid = int(os.path.basename(p).split('_')[-1].split('.pt')[0])
+                except Exception:
+                    continue
+                if sid in analyzer.baseline:
+                    continue
+                try:
+                    tensor = torch.load(p, map_location='cpu')
+                    analyzer.baseline[sid] = tensor
+                    loaded += 1
+                except Exception as e:
+                    logging.warning(f"[SFT Analysis] Failed loading baseline from {p}: {e}")
+            logging.info(f"[SFT Analysis][rank {rank}] loaded {loaded} baselines from disk.")
+        else:
+            logging.warning(f"[SFT Analysis] baseline dir not found: {baseline_dir}")
+
 
 trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 trainer.save_model(training_args.output_dir)

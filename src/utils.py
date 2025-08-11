@@ -42,14 +42,12 @@ def get_args():
                         help="Proportion (0~1] of the whole training dataset to sample for representation analysis. Ignored if disable.")
     parser.add_argument("--sft_analysis_seed", type=int, default=1234,
                         help="Random seed for sampling analysis subset.")
-    parser.add_argument("--sft_analysis_max_samples", type=int, default=2000,
+    parser.add_argument("--sft_analysis_max_samples", type=int, default=500,
                         help="Maximum number of samples to track even if ratio yields more.")
     parser.add_argument("--sft_analysis_save_dir", type=str, default="./sft_analysis",
                         help="Directory to save analysis artifacts (subset ids, per-epoch cosine stats).")
     parser.add_argument("--sft_analysis_categories", type=str, nargs='+', default=["boxed_start_poss","observation_poss"],
                         help="Token position categories to aggregate: boxed_start_poss, observation_poss, non_observation_poss.")
-    parser.add_argument("--sft_analysis_save_baseline", action='store_true', default=False,
-                        help="If set, persist baseline hidden states (may be large). Otherwise only keep in memory.")
     # DeepSpeed config path (optional). If provided, Trainer will enable DeepSpeed with this config.
     parser.add_argument("--deepspeed", type=str, default="",
                         help="Path to DeepSpeed config JSON, e.g., ./deepspeed/ds_zero2_cpu_offload.json")
@@ -564,8 +562,8 @@ def resize_by_token_budget(images,
 
 
 def resize_by_token_budget_sample_wise(images_per_sample,
-                                       global_max_pixels=640*3*28*28,
-                                       per_img_max_pixels=640*28*28,
+                                       global_max_pixels=800*3*28*28,
+                                       per_img_max_pixels=800*28*28,
                                        divisor=28):
     """逐样本等比缩放，每个样本单独满足像素预算。
 
@@ -649,7 +647,7 @@ class SFTRepAnalyzer:
     def __init__(self,
                  save_dir: str,
                  categories: List[str],
-                 save_baseline: bool = False,
+                 save_baseline: bool = True,
                  dataset_names: str = ""):
         self.save_dir = save_dir
         os.makedirs(save_dir, exist_ok=True)
@@ -660,6 +658,9 @@ class SFTRepAnalyzer:
         self.baseline: dict[int, torch.Tensor] = {}  # id -> (num_layers, seq, hidden)
         self.layer_count: int = 0
         self.per_epoch_records: dict[int, dict] = {}
+
+    def set_subset(self, subset_ids):
+        self.subset_ids = subset_ids
 
     def select_subset(self, total_size: int, ratio: float, max_samples: int, seed: int):
         import math, random, json
@@ -673,21 +674,25 @@ class SFTRepAnalyzer:
     def is_tracked(self, sample_id: int) -> bool:
         return sample_id in self.subset_ids
 
-    def build_baseline(self, sample_id: int, hidden_states: List[torch.Tensor]):
+    def build_baseline(self, sample_id: int, hidden_states: List[torch.Tensor], device=None):
         if sample_id not in self.subset_ids:
             return
         if hidden_states is None or len(hidden_states) == 0:
             logging.warning(f"[SFT Analysis] Empty hidden_states when building baseline for sample {sample_id}; skipping.")
             return
         try:
-            stacked = torch.stack([h[0].detach().cpu() for h in hidden_states], dim=0)  # (L,S,H)
+            stacked = torch.stack([h[0].detach().cpu() for h in hidden_states], dim=0)
+            if device is not None:
+                stacked = stacked.to(device)
+            # (L,S,H)
         except Exception as e:
             logging.error(f"[SFT Analysis] Failed stacking baseline hidden states for sample {sample_id}: {e}")
             return
         self.layer_count = stacked.shape[0]
         if self.save_baseline_flag:
-            os.makedirs(os.path.join(self.save_dir, 'baseline_reps'), exist_ok=True)
-            torch.save(stacked, os.path.join(self.save_dir, 'baseline_reps', f'baseline_{sample_id}.pt'))
+            baseline_folder = f'baseline_reps_{self.dataset_names}'
+            os.makedirs(os.path.join(self.save_dir, baseline_folder), exist_ok=True)
+            torch.save(stacked, os.path.join(self.save_dir, baseline_folder, f'baseline_{sample_id}.pt'))
         self.baseline[sample_id] = stacked
 
     @staticmethod
@@ -713,7 +718,7 @@ class SFTRepAnalyzer:
                 continue
             cur_norm = cur_sel / (cur_sel.norm(dim=-1, keepdim=True) + 1e-6)
             base_norm = base_sel / (base_sel.norm(dim=-1, keepdim=True) + 1e-6)
-            cos = (cur_norm * base_norm).sum(dim=-1)  # (L,P)
+            cos = (cur_norm.to(base_norm.device) * base_norm).sum(dim=-1)  # (L,P)
             layer_mean = cos.mean(dim=-1)  # (L)
             overall_mean = cos.mean().item()
             record[f'{cat}_layer_mean'] = layer_mean.tolist()
