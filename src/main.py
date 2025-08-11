@@ -44,7 +44,7 @@ os.environ['HF_HOME'] = cache_dir
 patch=14 # processor.image_processor.patch_size
 # Use slow processor to avoid fast-processor info spam and behavioral drift
 #processor = AutoProcessor.from_pretrained(args.model, use_fast=False)
-rocessor = AutoProcessor.from_pretrained(args.load_model_path, use_fast=False)
+processor = AutoProcessor.from_pretrained(args.load_model_path, use_fast=False)
 
 if _rank == 0:
     # Rewrite deprecated preprocessor.json into video_preprocessor.json by re-saving once
@@ -124,7 +124,7 @@ try:
 except Exception as _e:
     logging.debug(f"Selective gradient checkpointing skipped: {_e}")
 
-if args.stage in ['stage1']: model.resize_token_embeddings(len(processor.tokenizer))
+if args.stage in ['stage1', 'avt_stage1', 'avt_sft']: model.resize_token_embeddings(len(processor.tokenizer))
 
 if args.stage in ['stage1', 'stage2']:
     latent_token_idx = processor.tokenizer("<|latent_pad|>", return_tensors="pt")["input_ids"][0]
@@ -418,6 +418,11 @@ def collate_fn_avt_sft(examples):
                 poss_of_a_sample.extend(list(range(start, end + 1)))
         batch["observation_poss"].append(poss_of_a_sample)
     batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, end_pad_token_idx, img_pad_token_idx)
+
+    if (batch["teacher_labels"] != -100).sum().item() == 0:
+        raise RuntimeError("No supervised tokens found; check chat template / start pattern.")
+
+
     # Build non_observation_poss: positions where label != -100 and not in observation_poss
     non_obs_poss = []
     teacher_labels = batch["teacher_labels"]
@@ -460,7 +465,9 @@ else:
     wrapped_dataset = None
 
 
-exp_name = f"ep{args.epochs}-bsz{args.bsz}-lr{1e-5}-{args.min_latent_size}-{args.min_latent_compress_factor}-{args.max_latent_compress_factor}"
+exp_name = f"ep{args.epochs}-bsz{args.bsz}-lr{1e-5}"
+if args.stage == 'avt_stage1':
+    exp_name += f"-{args.min_latent_size}-{args.min_latent_compress_factor}-{args.max_latent_compress_factor}"
 if args.stage in ["avt_stage1"]:
     exp_name = f"{args.alignment}-" + exp_name
 exp_name = args.stage+'-'+exp_name
@@ -471,6 +478,7 @@ for data_path in args.data_path:
     dataset_name = data_path.split("/")[-2]
     dataset_names += f"-{dataset_name}"
 dataset_name += dataset_names
+exp_name += dataset_names
 save_dir = f"./checkpoints/{exp_name}"
 
 if args.stage in ['stage1']:

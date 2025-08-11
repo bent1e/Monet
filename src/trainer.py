@@ -81,7 +81,8 @@ class CustomTrainerAVTStage1(SFTTrainer):
             for student_rep_l_b, teacher_rep_l_b in zip(student_reps_l, teacher_reps_l):
                 if student_rep_l_b.shape[0] == 0 or teacher_rep_l_b.shape[0] == 0:
                     continue
-                sim = torch.nn.functional.cosine_similarity(student_rep_l_b, teacher_rep_l_b).mean()
+                # 避免零范数导致 NaN，增加 eps
+                sim = torch.nn.functional.cosine_similarity(student_rep_l_b, teacher_rep_l_b, eps=1e-6).mean()
                 layer_loss += 1 - sim
                 layerwise_sim += sim.item()
             total_loss += layer_loss/ bsz

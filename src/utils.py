@@ -423,6 +423,7 @@ def generate_labels_after_multi_token_start(
         
         if start_idx == -1:
             # Sub-sequence not found -> mask everything
+            logging.warning(f"Couldn't find the <|im_start|>assistant, all labels are -100")
             row[:] = -100
         else:
             # The sub-sequence length
