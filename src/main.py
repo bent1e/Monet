@@ -49,7 +49,7 @@ processor = AutoProcessor.from_pretrained(args.load_model_path, use_fast=False)
 if _rank == 0:
     # Rewrite deprecated preprocessor.json into video_preprocessor.json by re-saving once
     try:
-        processor.save_pretrained(args.model)
+        processor.save_pretrained(args.load_model_path)
     except Exception as _e:
         logging.debug(f"Processor save_pretrained skip: {_e}")
 
@@ -479,7 +479,7 @@ for data_path in args.data_path:
     dataset_name = data_path.split("/")[-2]
     dataset_names += f"-{dataset_name}"
 if args.stage == "avt_sft":
-    exp_name += f"obs_ce_{args.observation_ce_factor}-obs_warmup_{args.observation_ce_warmup_steps}"
+    exp_name += f"-obs_ce_{args.observation_ce_factor}-warmup_{args.observation_ce_warmup_steps}"
 
 save_dir = f"./checkpoints/{exp_name}"
 if args.save_model_path != './checkpoints/':
@@ -544,6 +544,7 @@ if args.stage == 'avt_sft':
     setattr(training_args, 'dataset_names', dataset_names)
     setattr(training_args, 'observation_ce_factor', args.observation_ce_factor)
     setattr(training_args, 'observation_ce_warmup_steps', args.observation_ce_warmup_steps)
+    setattr(training_args, 'exp_name', exp_name)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(
@@ -573,12 +574,11 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
     is_dist = dist.is_available() and dist.is_initialized()
     rank = dist.get_rank() if is_dist else 0
     world_size = dist.get_world_size() if is_dist else 1
-
+    exp_save_folder = analyzer.exp_save_folder
     if analyzer is not None:
-        subset_dir = analyzer.save_dir
-        os.makedirs(subset_dir, exist_ok=True)
-        subset_file = os.path.join(subset_dir, f'subset_ids{dataset_names}.json')
-        ready_marker = os.path.join(subset_dir, f'.subset_ready{dataset_names}')
+        os.makedirs(exp_save_folder, exist_ok=True)
+        subset_file = os.path.join(exp_save_folder, f'subset_ids{dataset_names}.json')
+        ready_marker = os.path.join(exp_save_folder, f'.subset_ready{dataset_names}')
 
         # Step 1: rank0 selects subset and signals readiness
         if rank == 0:
@@ -658,7 +658,7 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
         mdl.eval()
 
         # clean up the saved reps from previous SFT experiments
-        rep_save_path = os.path.join(analyzer.save_dir, f'baseline_reps{dataset_names}')
+        rep_save_path = exp_save_folder
         if os.path.isdir(rep_save_path):
             shutil.rmtree(rep_save_path)
             os.makedirs(rep_save_path, exist_ok=True)
@@ -697,11 +697,9 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
             logging.info(f"[SFT Analysis][rank {rank}] passed barrier, start loading baselines")
 
         # Step 6: load all baselines from disk to local memory for training-time updates
-        baseline_dir = os.path.join(analyzer.save_dir, f'baseline_reps{dataset_names}')
-        if os.path.isdir(baseline_dir):
+        if os.path.isdir(rep_save_path):
             import glob
-
-            paths = glob.glob(os.path.join(baseline_dir, 'baseline_*.pt'))
+            paths = glob.glob(os.path.join(rep_save_path, 'baseline_*.pt'))
             loaded = 0
             for p in tqdm(paths, desc=f"[rank {rank}] loading all baseline reps", total=len(paths)):
                 try:

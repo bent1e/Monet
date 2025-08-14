@@ -652,7 +652,8 @@ class SFTRepAnalyzer:
                  save_dir: str,
                  categories: List[str],
                  save_baseline: bool = True,
-                 dataset_names: str = ""):
+                 dataset_names: str = "",
+                 exp_name: str = ""):
         self.save_dir = save_dir
         os.makedirs(save_dir, exist_ok=True)
         self.categories = categories
@@ -662,6 +663,9 @@ class SFTRepAnalyzer:
         self.baseline: dict[int, torch.Tensor] = {}  # id -> (num_layers, seq, hidden)
         self.layer_count: int = 0
         self.per_epoch_records: dict[int, dict] = {}
+        self.exp_name = exp_name
+        self.exp_save_folder = os.path.join(self.save_dir, self.exp_name)
+        os.makedirs(self.exp_save_folder, exist_ok=True)
 
     def set_subset(self, subset_ids):
         self.subset_ids = subset_ids
@@ -671,7 +675,7 @@ class SFTRepAnalyzer:
         rng = random.Random(seed)
         k = min(max_samples, max(1, int(math.ceil(total_size * ratio))))
         self.subset_ids = sorted(rng.sample(range(total_size), k))
-        with open(os.path.join(self.save_dir, 'subset_ids.json'), 'w') as f:
+        with open(os.path.join(self.exp_save_folder, 'subset_ids.json'), 'w') as f:
             json.dump(self.subset_ids, f)
         return self.subset_ids
 
@@ -694,9 +698,7 @@ class SFTRepAnalyzer:
             return
         self.layer_count = stacked.shape[0]
         if self.save_baseline_flag:
-            baseline_folder = f'baseline_reps{self.dataset_names}'
-            os.makedirs(os.path.join(self.save_dir, baseline_folder), exist_ok=True)
-            torch.save(stacked, os.path.join(self.save_dir, baseline_folder, f'baseline_{sample_id}.pt'))
+            torch.save(stacked, os.path.join(self.exp_save_folder, f'baseline_{sample_id}.pt'))
         self.baseline[sample_id] = stacked
 
     @staticmethod
@@ -751,10 +753,10 @@ class SFTRepAnalyzer:
                 summary[f'{cat}_layer_mean_avg'] = [v/count for v in layer_accumulator]
         summary['num_samples_with_cat'] = {cat: sum(1 for rec in samples if f'{cat}_layer_mean' in rec) for cat in self.categories}
         out = {'epoch': epoch, 'summary': summary, 'samples': samples}
-        out_path = os.path.join(self.save_dir, f'epoch_{epoch}_rep_analysis{self.dataset_names}.json')
+        out_path = os.path.join(self.exp_save_folder, f'epoch_{epoch}_rep_analysis{self.exp_name}.json')
         with open(out_path, 'w') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         logging.info(f"[SFT Analysis] Saved epoch {epoch} rep analysis to {out_path}; samples={len(samples)}")
 
     def save_state(self):
-        torch.save({'subset_ids': self.subset_ids}, os.path.join(self.save_dir, 'state.pt'))
+        torch.save({'subset_ids': self.subset_ids}, os.path.join(self.exp_save_folder, 'state.pt'))

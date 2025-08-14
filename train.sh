@@ -74,7 +74,7 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
   --log_file "./log.txt" \
   --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
   --sft_analysis_enable \
-  --sft_analysis_ratio 0.1 \
+  --sft_analysis_max_samples 10 \
   --sft_analysis_categories non_observation_poss observation_poss \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --observation_ce_factor 3.0 \
@@ -120,7 +120,8 @@ conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export TOKENIZERS_PARALLELISM=false
-python -m src.main \
+# Use torchrun to enable proper distributed/DeepSpeed setup; avoids accidental nn.DataParallel wrapping
+torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --model "/home/dids/shiyang/checkpoints/0812-avt_sft-shuffle" \
     --epochs 10 \
     --bsz 1 \
@@ -140,6 +141,6 @@ python -m src.main \
     "./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json" \
     "./new/created_dataset/filtered_data/VTS_1/filtered_train.json" \
     --log_file "./log.txt" \
-    --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
+    --load_model_path "/home/dids/shiyang/checkpoints/0812-avt_sft-shuffle" \
     --alignment "observation_all" \
     --deepspeed ./deepspeed/ds_zero2_gpu.json 
