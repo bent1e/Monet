@@ -17,6 +17,7 @@ from src.task import *
 from src.trainer import CustomTrainerStage1, CustomTrainerStage2
 from src.trainer import CustomTrainerAVTStage1, CustomTrainerSFT
 import random
+import wandb
 
 seed_everything(seed=42)
 args=get_args()
@@ -50,6 +51,7 @@ if _rank == 0:
     # Rewrite deprecated preprocessor.json into video_preprocessor.json by re-saving once
     try:
         processor.save_pretrained(args.load_model_path)
+        wandb.init(project='Latent_Think',name='08_14-avt_sft',config={"observation_ce_factor":args.observation_ce_factor,"sft_analysis_ratio":args.sft_analysis_ratio})
     except Exception as _e:
         logging.debug(f"Processor save_pretrained skip: {_e}")
 
