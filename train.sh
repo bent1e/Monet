@@ -71,14 +71,15 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     "./new/created_dataset/filtered_data/Zebra_CoT_geometry/filtered_train.json" \
     "./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json" \
     "./new/created_dataset/filtered_data/VTS_1/filtered_train.json" \
+  --shuffle_train \
   --log_file "./log.txt" \
   --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
   --sft_analysis_enable \
-  --sft_analysis_max_samples 10 \
+  --sft_analysis_max_samples 500 \
   --sft_analysis_categories non_observation_poss observation_poss \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --observation_ce_factor 3.0 \
-  --observation_ce_warmup_steps 100
+  --observation_ce_warmup_steps 100 
 
 
 export CUDA_HOME=/usr/local/cuda-12.6

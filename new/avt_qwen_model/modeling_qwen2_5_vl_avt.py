@@ -1206,7 +1206,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         teacher_hidden_states_for_alignment: Optional[List[List[torch.Tensor]]] = None, # for the latent forward
         ce_patch_pos: Optional[List[List[int]]] = None, 
         ce_patch_vec: Optional[List[torch.Tensor]] = None,
-        sft_analysis_poss: Optional[dict] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
         r"""
@@ -1630,7 +1629,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         hidden_states_to_return.append(hidden_states_per_layer)
                 else: # sft analysis
                     hidden_states_to_return = outputs.hidden_states
-                
+
             output = Qwen2_5_VLModelOutputWithPast(
                 last_hidden_state=outputs.last_hidden_state,
                 past_key_values=outputs.past_key_values,
@@ -1745,6 +1744,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         ce_patch_pos: Optional[List[List[int]]] = None, 
         ce_patch_vec: Optional[List[torch.Tensor]] = None,
         observation_ce_factor: Optional[float] = 1.0,
+        ce_emphasize_poss: Optional[List[List[int]]] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLCausalLMOutputWithPast]:
         r"""
@@ -1829,9 +1829,9 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
 
         loss = None
         if labels is not None and not latent_mode:
-            # Optional: apply per-token weighting on alignment_poss
+            # Optional: apply per-token weighting on ce_emphasize_poss
             use_weight = (
-                alignment_poss is not None and isinstance(alignment_poss, (list, tuple)) and len(alignment_poss) > 0 and
+                ce_emphasize_poss is not None and isinstance(ce_emphasize_poss, (list, tuple)) and len(ce_emphasize_poss) > 0 and
                 isinstance(observation_ce_factor, (int, float)) and observation_ce_factor is not None and float(observation_ce_factor) != 1.0
             )
             if use_weight:
@@ -1848,12 +1848,12 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                 # Build weights mask
                 weight = torch.ones_like(ce)
                 try:
-                    for b, poss in enumerate(alignment_poss):
+                    for b, poss in enumerate(ce_emphasize_poss):
                         if poss is None:
                             continue
                         weight[b, torch.tensor(poss)-1] = float(observation_ce_factor)
                 except Exception:
-                    # Fallback to unweighted if alignment_poss malformed
+                    # Fallback to unweighted if ce_emphasize_poss malformed
                     weight = torch.ones_like(ce)
 
                 valid = (shift_labels != -100).float()

@@ -659,9 +659,13 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
 
         # clean up the saved reps from previous SFT experiments
         rep_save_path = exp_save_folder
-        if os.path.isdir(rep_save_path):
+        if os.path.isdir(rep_save_path) and rank == 0:
             shutil.rmtree(rep_save_path)
             os.makedirs(rep_save_path, exist_ok=True)
+
+        if dist:
+            dist.barrier()
+            logging.info(f"[SFT Analysis][rank {rank}] passed barrier, start generating baselines")
 
         with torch.inference_mode():
             bs = min(2, args.bsz)
@@ -716,7 +720,7 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
                     logging.warning(f"[SFT Analysis] Failed loading baseline from {p}: {e}")
             logging.info(f"[SFT Analysis][rank {rank}] loaded {loaded} baselines from disk.")
         else:
-            logging.warning(f"[SFT Analysis] baseline dir not found: {baseline_dir}")
+            logging.warning(f"[SFT Analysis] baseline dir not found: {rep_save_path}")
 
 
 trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

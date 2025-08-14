@@ -109,9 +109,10 @@ class CustomTrainerAVTStage1(SFTTrainer):
         inputs['labels'] = None #inputs['teacher_labels'] # We needn't compute the ce loss for the teacher input in this stage
         inputs['alignment_poss'] = inputs['teacher_alignment_poss']
         inputs['image_out_mask'] = inputs['teacher_image_out_mask']
-        (_, teacher_outputs) = super().compute_loss(
-                model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
-            )
+        #(_, teacher_outputs) = super().compute_loss(
+        #        model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        #    )
+        teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
             
         inputs['latent_mode'] = True
         inputs['input_ids'] = inputs['student_input_ids']
@@ -264,9 +265,8 @@ class CustomTrainerSFT(SFTTrainer):
         for k in ['boxed_start_poss','observation_poss','non_observation_poss']:
             if k in inputs:
                 poss_dict[k] = inputs[k]
-        inputs['sft_analysis_poss'] = poss_dict
-        if 'sft_analysis_poss' in inputs and isinstance(inputs['sft_analysis_poss'], dict):
-            inputs['alignment_poss'] = inputs['sft_analysis_poss'].get('observation_poss', None)
+        sft_analysis_poss = poss_dict
+        inputs['ce_emphasize_poss'] = inputs['observation_poss']
         # Dynamic warmup factor passed to model.forward
         inputs['observation_ce_factor'] = self._current_observation_ce_factor()
         #print("Observation CE Factor:", inputs['observation_ce_factor'])
@@ -286,7 +286,7 @@ class CustomTrainerSFT(SFTTrainer):
                         sid_int = int(sid)
                         if self.rep_analyzer.is_tracked(sid_int):
                             # positions dict from inputs['sft_analysis_poss'] per sample index b
-                            poss_all = inputs.get('sft_analysis_poss', {})
+                            poss_all = sft_analysis_poss
                             # expect each value is List[List[int]] of length B
                             pos_dict = {}
                             for cat, batch_poss in poss_all.items():
