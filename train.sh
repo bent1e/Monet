@@ -55,7 +55,6 @@ cd /home/dids/shiyang/codes/abstract-visual-token
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 export TOKENIZERS_PARALLELISM=false
 torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
-  --model "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
   --epochs 10 \
   --bsz 1 \
   --grad_accum_steps 16 \
@@ -74,9 +73,6 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
   --shuffle_train \
   --log_file "./log.txt" \
   --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
-  --sft_analysis_enable \
-  --sft_analysis_max_samples 500 \
-  --sft_analysis_categories non_observation_poss observation_poss \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --observation_ce_factor 3.0 \
   --observation_ce_warmup_steps 100 

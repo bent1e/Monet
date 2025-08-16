@@ -406,7 +406,7 @@ elif args.stage == 'avt_sft':
 # 
 if args.deepspeed != "":
     print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
-is_dist=False
+is_parallel = int(os.environ.get("WORLD_SIZE", "1")) > 1
 training_args = SFTConfig(
     output_dir=save_dir,
     num_train_epochs=args.epochs,
@@ -432,9 +432,9 @@ training_args = SFTConfig(
     # Avoid FLOPs estimation logs (set to False through env if needed)
     disable_tqdm=False,
     # DDP related
-    ddp_backend="nccl" if is_dist else None,
-    ddp_find_unused_parameters=False if is_dist else None,
-    dataloader_num_workers=4 if is_dist else 0,
+    ddp_backend="nccl" if is_parallel else None,
+    ddp_find_unused_parameters=False if is_parallel else None,
+    dataloader_num_workers=4 if is_parallel else 0,
     dataloader_pin_memory=True,
     # Save only on global rank 0 when running multi-node
     save_on_each_node=False,
