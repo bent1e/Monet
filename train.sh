@@ -129,7 +129,6 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --stage "avt_stage1" \
     --data_path \
     "./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json" \
-    "./new/created_dataset/filtered_data/VTS_1/filtered_train.json" \
     --log_file "./log.txt" \
     --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle" \
     --min_latent_size 6 \
@@ -137,4 +136,5 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --max_latent_compress_factor 40 \
     --alignment_weight 2.0 \
     --alignment "observation_all" \
-    --deepspeed ./deepspeed/ds_zero2_gpu.json 
+    --deepspeed ./deepspeed/ds_zero2_gpu.json \
+    --wandb_name=test_qixun

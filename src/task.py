@@ -1,6 +1,8 @@
 from PIL import Image
 from pathlib import Path
 import os
+from src.utils import *
+from qwen_vl_utils import process_vision_info
 def single_input_image_preprocess_function(sample):
     # Load images
     image = Image.open(sample["image_input"][0]).convert("RGB") 
@@ -105,8 +107,7 @@ def OLD_abstract_visual_token_single_input_images_preprocess_function(sample, ad
     
     return merged_conversations
 
-
-def avt_single_input_images_preprocess_function(sample, dataset_root=""):
+def avt_single_input_images_preprocess_function(sample, dataset_root="", processor=None, max_seq_len=4096, cur_max=-1, id=0, rank=-1):
     """
     Preprocess function for AVT with single input images.
     """
@@ -122,12 +123,12 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
                 content["image"] = os.path.join(dataset_root,content.pop("image_file_name")) 
                 if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
-                        return None
+                        return None, cur_max
             
             new_step["content"][j] = content
         conversations[i] = new_step
-    
-    return conversations
+
+    return conversations, cur_max
 
 
 

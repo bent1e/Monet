@@ -349,10 +349,18 @@ for data_path in args.data_path:
 if args.shuffle_train:
     random.seed(42)
     random.shuffle(all_train_dataset)
-# Check if the preprocess function is abstract_visual_token_single_input_images_preprocess_function
-if "avt" in args.stage:
-    preprocess_function = partial(preprocess_function, dataset_root=args.dataset_root)
-train_dataset = [d for d in [preprocess_function(sample) for sample in all_train_dataset[:]] if d is not None]
+
+train_dataset = []
+cur_max = -1
+for i, sample in tqdm(enumerate(all_train_dataset[:]), desc="Collecting training data and length check...", total=len(all_train_dataset)):
+    if 'avt' in args.stage:
+        processed, cur_max = preprocess_function(sample, dataset_root=args.dataset_root, processor=processor, max_seq_len=6000, cur_max=cur_max, id=i, rank=_rank)
+    else:
+        processed = preprocess_function(sample)
+    if processed is not None:
+        train_dataset.append(processed)
+
+#train_dataset = [d for d in [preprocess_function(sample) for sample in all_train_dataset[:]] if d is not None]
 
 # ---- Conversation wrapper for avt_sft stage (adds sample_id) ----
 if args.stage == 'avt_sft':

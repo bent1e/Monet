@@ -2891,3 +2891,535 @@
 2025-08-15 18:09:05 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -c /tmp/tmp64o74z5o/test.c -o /tmp/tmp64o74z5o/test.o
 2025-08-15 18:09:05 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat /tmp/tmp64o74z5o/test.o -L/usr/local/cuda-12.6 -L/usr/local/cuda-12.6/lib64 -lcufile -o /tmp/tmp64o74z5o/a.out
 2025-08-15 18:09:07 - WARNING - Gradient accumulation steps mismatch: GradientAccumulationPlugin has 1, DeepSpeed config has 16. Using DeepSpeed's value.
+2025-08-15 19:52:09 - INFO - ========================================
+2025-08-15 19:52:09 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 19:52:09 - INFO - ========================================
+2025-08-15 19:53:08 - INFO - ========================================
+2025-08-15 19:53:08 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 19:53:08 - INFO - ========================================
+2025-08-15 19:54:48 - INFO - ========================================
+2025-08-15 19:54:48 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 19:54:48 - INFO - ========================================
+2025-08-15 19:56:34 - INFO - ========================================
+2025-08-15 19:56:34 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 19:56:34 - INFO - ========================================
+2025-08-15 20:03:36 - INFO - ========================================
+2025-08-15 20:03:36 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:03:36 - INFO - ========================================
+2025-08-15 20:05:42 - INFO - ========================================
+2025-08-15 20:05:42 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:05:42 - INFO - ========================================
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=892
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=721
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=814
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=740
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=803
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=827
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=731
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=806
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=896
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=812
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=743
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=849
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=720
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=790
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=781
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=787
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=775
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=725
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=880
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=785
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=713
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=826
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=767
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=770
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=753
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=782
+2025-08-15 20:06:06 - INFO - Max_seq_len (including image and text tokens) of all training data=773
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=856
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=775
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=799
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=726
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=755
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=758
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=761
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=817
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=767
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=773
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=716
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=803
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=753
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=780
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=794
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=689
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=802
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=792
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=808
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=760
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=797
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=790
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=749
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=691
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=748
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=850
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=742
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=812
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=743
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=773
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=922
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=744
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=713
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=814
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=828
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=693
+2025-08-15 20:06:07 - INFO - Max_seq_len (including image and text tokens) of all training data=796
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=814
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=721
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=731
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=783
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=779
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=753
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=817
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=745
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=730
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=832
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=794
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=788
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=737
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=801
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=791
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=792
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=897
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=677
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=789
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=811
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=785
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=799
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=778
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=740
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=750
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=836
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=731
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=805
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=729
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=826
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=901
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=794
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=680
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=726
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=782
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=857
+2025-08-15 20:06:08 - INFO - Max_seq_len (including image and text tokens) of all training data=776
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=679
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=694
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=774
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=889
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=769
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=731
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=812
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=726
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=762
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=826
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=831
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=805
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=757
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=847
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=802
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=807
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=807
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=746
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=733
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=824
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=787
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=784
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=733
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=774
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=781
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=725
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=825
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=690
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=764
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=685
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=834
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=703
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=669
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=807
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=859
+2025-08-15 20:06:09 - INFO - Max_seq_len (including image and text tokens) of all training data=787
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=813
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=713
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=840
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=695
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=802
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=730
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=813
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=865
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=686
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=776
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=744
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=800
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=776
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=822
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=907
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=849
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=783
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=962
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=883
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=938
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=970
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=1083
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=966
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=878
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=820
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=982
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=1048
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=965
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=924
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=966
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=903
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=981
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=979
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=917
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=902
+2025-08-15 20:06:10 - INFO - Max_seq_len (including image and text tokens) of all training data=876
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=928
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=905
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=930
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=854
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=884
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=912
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=805
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=905
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=845
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=941
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=933
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=900
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=986
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=784
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=901
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=842
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=924
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=840
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=835
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=856
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=809
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=895
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=795
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=985
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=830
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=881
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=968
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=929
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=945
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=953
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=830
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=980
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=831
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=902
+2025-08-15 20:06:11 - INFO - Max_seq_len (including image and text tokens) of all training data=1085
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=895
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=947
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=835
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=946
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=914
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=896
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=871
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=831
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=947
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=900
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=836
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=948
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=937
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=921
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=994
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=851
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=878
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=942
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=859
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=919
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=816
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=868
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=919
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=914
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=906
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=939
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=961
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=892
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=846
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=920
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=911
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=908
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=903
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=928
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=926
+2025-08-15 20:06:12 - INFO - Max_seq_len (including image and text tokens) of all training data=964
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=871
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=856
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=830
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=855
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=967
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=934
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=904
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=955
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=921
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=917
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=860
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=878
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=852
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=849
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=944
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=986
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=920
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1007
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=930
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1085
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=943
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=942
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=915
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=915
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1017
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=886
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=895
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=995
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1118
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1099
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1102
+2025-08-15 20:06:13 - INFO - Max_seq_len (including image and text tokens) of all training data=1063
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1088
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1075
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1076
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1122
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1056
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1062
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1166
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=918
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1175
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1112
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1152
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1120
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=994
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=890
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1112
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1070
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1005
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1069
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1048
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1086
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1095
+2025-08-15 20:06:14 - INFO - Max_seq_len (including image and text tokens) of all training data=1092
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1096
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1081
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1132
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=940
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1003
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1114
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1073
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=979
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=918
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1034
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1083
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=994
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=903
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1029
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=961
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=969
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1010
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1049
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1032
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=996
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=1070
+2025-08-15 20:06:15 - INFO - Max_seq_len (including image and text tokens) of all training data=940
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1125
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1229
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1125
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1072
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1042
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1045
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1141
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1083
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1072
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1085
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1158
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1025
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1094
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1082
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1066
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1039
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1111
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1154
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1101
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1063
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1173
+2025-08-15 20:06:16 - INFO - Max_seq_len (including image and text tokens) of all training data=1117
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1043
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=978
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1115
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1072
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1164
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1058
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1008
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1104
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1039
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1179
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1008
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1072
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1167
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1059
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1026
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=956
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1146
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1149
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1023
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1132
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=958
+2025-08-15 20:06:17 - INFO - Max_seq_len (including image and text tokens) of all training data=1105
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=909
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1204
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=984
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1022
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=945
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1068
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1131
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=962
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1033
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1122
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1111
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1091
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=967
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1167
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1111
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1063
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1105
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=947
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1074
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=1014
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=937
+2025-08-15 20:06:18 - INFO - Max_seq_len (including image and text tokens) of all training data=986
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=978
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=929
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1095
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1087
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1299
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1099
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=959
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=940
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1269
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1111
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1096
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1026
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1068
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1259
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1108
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1078
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1017
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1159
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1031
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1039
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1217
+2025-08-15 20:06:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1180
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1150
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1125
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1026
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=968
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1115
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1061
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1017
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1106
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1059
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1131
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1107
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1076
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=952
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1047
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1057
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=972
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1040
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1097
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=983
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=999
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=997
+2025-08-15 20:06:20 - INFO - Max_seq_len (including image and text tokens) of all training data=1084
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1202
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1093
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1085
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1003
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1075
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1148
+2025-08-15 20:06:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1110
+2025-08-15 20:08:10 - INFO - ========================================
+2025-08-15 20:08:10 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:08:10 - INFO - ========================================
+2025-08-15 20:11:53 - INFO - ========================================
+2025-08-15 20:11:53 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:11:53 - INFO - ========================================
+2025-08-15 20:12:17 - INFO - Max_seq_len (including image and text tokens) of all training data=6000
+2025-08-15 20:12:20 - INFO - Max_seq_len (including image and text tokens) of all training data=6000
+2025-08-15 20:12:23 - INFO - Max_seq_len (including image and text tokens) of all training data=6000
+2025-08-15 20:12:26 - INFO - Max_seq_len (including image and text tokens) of all training data=6000
+2025-08-15 20:12:31 - INFO - Max_seq_len (including image and text tokens) of all training data=6000
+2025-08-15 20:13:14 - INFO - ========================================
+2025-08-15 20:13:14 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:13:14 - INFO - ========================================
+2025-08-15 20:16:38 - INFO - ========================================
+2025-08-15 20:16:38 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:16:38 - INFO - ========================================
+2025-08-15 20:17:02 - INFO - Max_seq_len (including image and text tokens) of all training data=892
+2025-08-15 20:17:43 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:18:23 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:19:02 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:19:46 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:20:45 - INFO - Max_seq_len (including image and text tokens) of all training data=2228
+2025-08-15 20:22:18 - INFO - ========================================
+2025-08-15 20:22:18 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json', './new/created_dataset/filtered_data/VTS_1/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 20:22:18 - INFO - ========================================
+2025-08-15 20:22:42 - INFO - Max_seq_len (including image and text tokens) of all training data=892
+2025-08-15 20:23:21 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:24:01 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:24:39 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:25:19 - INFO - Max_seq_len (including image and text tokens) of all training data=1447
+2025-08-15 20:26:01 - INFO - Max_seq_len (including image and text tokens) of all training data=2228
+2025-08-15 20:27:57 - INFO - Max_seq_len (including image and text tokens) of all training data=2722
+2025-08-15 20:30:46 - INFO - Max_seq_len (including image and text tokens) of all training data=2958
+2025-08-15 20:33:34 - INFO - Max_seq_len (including image and text tokens) of all training data=3124
+2025-08-15 20:35:59 - INFO - Max_seq_len (including image and text tokens) of all training data=3271
+2025-08-15 20:37:02 - INFO - Max_seq_len (including image and text tokens) of all training data=3271
+2025-08-15 20:38:04 - INFO - Max_seq_len (including image and text tokens) of all training data=3271
+2025-08-15 20:40:05 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:42:57 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:45:48 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:48:14 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:49:33 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:51:22 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:52:01 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:52:43 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:53:33 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:54:47 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:55:59 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:57:13 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 20:58:28 - INFO - Max_seq_len (including image and text tokens) of all training data=4926
+2025-08-15 21:00:05 - INFO - Max_seq_len (including image and text tokens) of all training data=5470
+2025-08-15 21:00:08 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -c /tmp/tmp8uf9ouel/test.c -o /tmp/tmp8uf9ouel/test.o
+2025-08-15 21:00:08 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat /tmp/tmp8uf9ouel/test.o -laio -o /tmp/tmp8uf9ouel/a.out
+2025-08-15 21:00:08 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -c /tmp/tmp2yv5tykm/test.c -o /tmp/tmp2yv5tykm/test.o
+2025-08-15 21:00:08 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat /tmp/tmp2yv5tykm/test.o -L/usr/local/cuda-12.6 -L/usr/local/cuda-12.6/lib64 -lcufile -o /tmp/tmp2yv5tykm/a.out
+2025-08-15 21:00:10 - WARNING - Gradient accumulation steps mismatch: GradientAccumulationPlugin has 1, DeepSpeed config has 16. Using DeepSpeed's value.
+2025-08-15 23:15:09 - INFO - ========================================
+2025-08-15 23:15:09 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000.json', './new/created_dataset/filtered_data/VTS_1/filtered_train_short3000.json', './new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_short3000.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 23:15:09 - INFO - ========================================
+2025-08-15 23:16:12 - INFO - ========================================
+2025-08-15 23:16:12 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000.json', './new/created_dataset/filtered_data/VTS_1/filtered_train_short3000.json', './new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_short3000.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-15 23:16:12 - INFO - ========================================
+2025-08-16 00:17:20 - INFO - ========================================
+2025-08-16 00:17:20 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000.json', './new/created_dataset/filtered_data/VTS_1/filtered_train_short3000.json', './new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_short3000.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name=None, sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-16 00:17:20 - INFO - ========================================
+2025-08-16 09:39:53 - INFO - ========================================
+2025-08-16 09:39:53 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000.json', './new/created_dataset/filtered_data/VTS_1/filtered_train_short3000.json', './new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_short3000.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name='test_qixun', sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-16 09:39:53 - INFO - ========================================
+2025-08-16 09:43:54 - INFO - ========================================
+2025-08-16 09:43:54 - INFO - Namespace(load_model_path='/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-0812-avt_sft-shuffle', data_path=['./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train.json'], stage='avt_stage1', task='mm-reasoning', save_model_path='./checkpoints/', resume_from_checkpoint=False, dataset_root='./new', deepspeed='./deepspeed/ds_zero2_gpu.json', bsz=1, grad_accum_steps=16, epochs=2, shuffle_train=False, observation_ce_factor=1.0, observation_ce_warmup_steps=50, latent_size=4, min_latent_size=6, min_latent_compress_factor=30, max_latent_compress_factor=40, alignment_weight='2.0', alignment='observation_all', log_file='./log.txt', wandb_name='test_qixun', sft_analysis_enable=False, sft_analysis_ratio=0.02, sft_analysis_seed=1234, sft_analysis_max_samples=200, sft_analysis_save_dir='./sft_analysis', sft_analysis_categories=['boxed_start_poss', 'observation_poss'])
+2025-08-16 09:43:54 - INFO - ========================================
+2025-08-16 09:44:25 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -c /tmp/tmpv392uda2/test.c -o /tmp/tmpv392uda2/test.o
+2025-08-16 09:44:25 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat /tmp/tmpv392uda2/test.o -laio -o /tmp/tmpv392uda2/a.out
+2025-08-16 09:44:25 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -O2 -isystem /home/dids/miniconda3/envs/mirage/include -fPIC -c /tmp/tmpswx5km5s/test.c -o /tmp/tmpswx5km5s/test.o
+2025-08-16 09:44:25 - INFO - gcc -pthread -B /home/dids/miniconda3/envs/mirage/compiler_compat /tmp/tmpswx5km5s/test.o -L/usr/local/cuda-12.6 -L/usr/local/cuda-12.6/lib64 -lcufile -o /tmp/tmpswx5km5s/a.out
+2025-08-16 09:44:27 - WARNING - Gradient accumulation steps mismatch: GradientAccumulationPlugin has 1, DeepSpeed config has 16. Using DeepSpeed's value.

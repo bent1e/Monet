@@ -71,6 +71,11 @@ class CustomTrainerAVTStage1(SFTTrainer):
                     "loss_student_ce",
                     "loss_align"
                 ])
+        
+        self._al_loss_cum = 0.0       # cumulative alignment loss since last log
+        self._al_steps = 0            # number of micro-steps accumulated
+        self._stu_ce_cum = 0.0        # cumulative student CE loss
+        self._stu_ce_steps = 0
                 
     def alignment_loss(self, student_reps_all_layers, teacher_reps_all_layers):
         total_loss = 0.
@@ -95,7 +100,9 @@ class CustomTrainerAVTStage1(SFTTrainer):
             print("student_poss =",student_poss)
             print("teacher_poss =",teacher_poss)'''
         return total_loss
-
+        #if return_outputs:
+        #    return {"total_loss": loss, "ce_loss": ce_loss, "sim_loss": sim_loss}, outputs
+        #return {"total_loss": loss, "ce_loss": ce_loss, "sim_loss": sim_loss}
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -162,7 +169,14 @@ class CustomTrainerAVTStage1(SFTTrainer):
             except Exception:
                 pass
         
-        # --------  写本地文件  --------
+        # -------- wandb logging --------
+        al_val = float(alignment_loss.detach().item()) if torch.is_tensor(alignment_loss) else float(alignment_loss)
+        self._al_loss_cum += al_val
+        self._al_steps += 1
+        self._stu_ce_cum += float(student_ce_loss.detach().item())
+        self._stu_ce_steps += 1
+
+        # --------  local logging  --------
         if self.is_main_process:
             with open(self.loss_log_path, "a", newline="") as f:
                 writer = csv.writer(f)
@@ -178,8 +192,22 @@ class CustomTrainerAVTStage1(SFTTrainer):
         
         return (loss, None) if return_outputs else loss
     
-    
-    
+    def log(self, logs: dict, start_time: float | None = None):
+        # Merge our rolling averages into the standard logs once per logging call
+        merged = dict(logs)
+        if self._al_steps > 0:
+            merged["alignment_loss"] = round(self._al_loss_cum / max(1, self._al_steps), 6)
+        if self._stu_ce_steps > 0:
+            merged["student_ce_loss"] = round(self._stu_ce_cum / max(1, self._stu_ce_steps), 6)
+
+        # Reset accumulators after logging so the next window starts fresh
+        self._al_loss_cum = 0.0
+        self._al_steps = 0
+        self._stu_ce_cum = 0.0
+        self._stu_ce_steps = 0
+
+        # Call parent to keep default behavior (console/TB/W&B/etc.)
+        return super().log(merged, start_time)
     
 class CustomTrainerSFT(SFTTrainer):
     def __init__(self, *args, **kwargs):
