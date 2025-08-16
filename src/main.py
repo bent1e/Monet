@@ -269,7 +269,7 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
             batch["teacher_alignment_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_token_pattern, end_pad_token_idx, latent_token_idx)
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_token_pattern, ignore_ids=[end_pad_token_idx, latent_token_idx])
 
     # We needn't compute the ce loss for the teacher 
     #batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, end_pad_token_idx, img_pad_token_idx)
@@ -305,6 +305,8 @@ def collate_fn_avt_sft(examples):
     batch['user_assistant_image_grid_thw'] = teacher_batch['image_grid_thw']
     img_pad_token_idx = processor.tokenizer("<|image_pad|>", return_tensors="pt")["input_ids"][0]
     end_pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
+    img_pad_start_idx = processor.tokenizer("<|vision_start|>", return_tensors="pt")["input_ids"][0]
+    img_pad_end_idx = processor.tokenizer("<|vision_end|>", return_tensors="pt")["input_ids"][0]
     answer_start_token_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
     batch["teacher_input_ids"] = teacher_batch["input_ids"]
     batch["teacher_attention_mask"] = teacher_batch["attention_mask"]
@@ -321,7 +323,7 @@ def collate_fn_avt_sft(examples):
             for start, end in zip(start_poss, end_poss):
                 poss_of_a_sample.extend(list(range(start, end + 1)))
         batch["observation_poss"].append(poss_of_a_sample)
-    batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, end_pad_token_idx, img_pad_token_idx)
+    batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, ignore_ids=[end_pad_token_idx, img_pad_token_idx, img_pad_start_idx, img_pad_end_idx])
 
     if (batch["teacher_labels"] != -100).sum().item() == 0:
         raise RuntimeError("No supervised tokens found; check chat template / start pattern.")
@@ -404,7 +406,7 @@ elif args.stage == 'avt_sft':
 # 
 if args.deepspeed != "":
     print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
-
+is_dist=False
 training_args = SFTConfig(
     output_dir=save_dir,
     num_train_epochs=args.epochs,
@@ -430,9 +432,9 @@ training_args = SFTConfig(
     # Avoid FLOPs estimation logs (set to False through env if needed)
     disable_tqdm=False,
     # DDP related
-    ddp_backend="nccl",
-    ddp_find_unused_parameters=False,
-    dataloader_num_workers=4,
+    ddp_backend="nccl" if is_dist else None,
+    ddp_find_unused_parameters=False if is_dist else None,
+    dataloader_num_workers=4 if is_dist else 0,
     dataloader_pin_memory=True,
     # Save only on global rank 0 when running multi-node
     save_on_each_node=False,
@@ -569,7 +571,7 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
             shutil.rmtree(rep_save_path)
             os.makedirs(rep_save_path, exist_ok=True)
 
-        if dist:
+        if is_dist:
             dist.barrier()
             logging.info(f"[SFT Analysis][rank {rank}] passed barrier, start generating baselines")
 

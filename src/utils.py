@@ -401,8 +401,7 @@ def find_ids_poss(input_ids: torch.Tensor, answer_start_token_pattern: torch.Ten
 def generate_labels_after_multi_token_start(
     input_ids: torch.Tensor,
     start_sequence: torch.Tensor,
-    pad_token_idx: int = 0,
-    img_token_idx: int = 151655,
+    ignore_ids: List[int] = None
 ) -> torch.Tensor:
     """
     For each row in `input_ids`, find the *first* occurrence of `start_sequence`
@@ -442,11 +441,11 @@ def generate_labels_after_multi_token_start(
             # Mask everything up to (and including) the sub-sequence
             row[:end_of_subseq] = -100
         
-        
-        # Mask pad tokens
-        row[row == pad_token_idx] = -100
-        # Mask image tokens
-        row[row == img_token_idx] = -100
+        for id in ignore_ids:
+            # Mask specified tokens (<|endoftext|>, <|vision_start|>, <|image_pad|>, <|vision_end|>)
+            row[row == id] = -100
+
+
     
     return labels
 
