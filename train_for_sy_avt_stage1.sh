@@ -39,4 +39,5 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --max_latent_compress_factor=${MAX_LATENT_COMPRESS_FACTOR} \
   --alignment_weight=${ALIGNMENT_WEIGHT} \
   --alignment=${ALIGNMENT} \
+  --ce_emphasize_factor=${CE_EMPHASIZE_FACTOR} \
   --wandb_name=08_15-avt_stage1-${MIN_LATENT_SIZE}-${MIN_LATENT_COMPRESS_FACTOR}-${MAX_LATENT_COMPRESS_FACTOR}-wt${ALIGNMENT_WEIGHT}-ce_emphasize${CE_EMPHASIZE_FACTOR}
