@@ -1645,20 +1645,23 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             last_token_h = sample_hidden_states  # [num_reqs, H] in pure decode
             # Iterate in batch order
             for i, req_id in enumerate(self.input_batch.req_ids):
-                st = self.abs_vis_state.setdefault(req_id, {"active": False, "pending": None})
+                st = self.abs_vis_state.setdefault(req_id, {"active": False, "pending": None, "current_len": 0})
                 # Detect boundaries from sampled ids of this step
                 gen_ids = valid_sampled_token_ids[i]
                 # Multiple tokens per req is unusual without spec; handle 0/1 robustly
-                for tid in gen_ids:
+                for j, tid in enumerate(gen_ids):
                     if not st["active"] and tid == self.abs_vis_start_id:
                         st["active"] = True
-                    elif st["active"] and tid == self.abs_vis_end_id:
+                    elif st["active"] and tid == self.abs_vis_end_id: #(tid == self.abs_vis_end_id or st["current_len"] > 20):
                         st["active"] = False
                         st["pending"] = None
+                        st["current_len"] = 0
+                        gen_ids[j] = self.abs_vis_end_id
                 # If currently active, set pending for next step from this step's last position
                 if st["active"] and last_token_h is not None and i < last_token_h.shape[0]:
                     # store a detached 1D tensor [H]
                     st["pending"] = last_token_h[i].detach()
+                    st["current_len"] +=1
 
         # Cache the sampled tokens in the model runner, so that the scheduler
         # doesn't need to send them back.

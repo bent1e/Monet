@@ -130,7 +130,28 @@ def avt_single_input_images_preprocess_function(sample, dataset_root="", process
 
     return conversations, cur_max
 
+def avt_single_input_images_preprocess_function_question_only(sample, dataset_root="", processor=None, max_seq_len=4096, cur_max=-1, id=0, rank=-1):
+    """
+    Preprocess function for AVT with single input images.
+    """
+    conversations = []
 
+    # Process image loading for all steps first
+    for i, step in enumerate(sample[:2]):
+        new_step = step.copy()
+        #if step["role"] == "system":
+        #    new_step["content"][0]["text"] += "Here is an example:\n\nWhat is the standing man wearing in this image? \nPut your final answer within \\boxed{}.\n\nI need to locate the standing man in the provided image and observe what he is wearing. To clearly identify what the man is wearing, I will generate a zoomed-in view of his face. \n<abs_vis_token></abs_vis_token> <observation>The zoomed-in image clearly shows the man is wearing a red hat and sunglasses.</observation> Based on the visual evidence, <observation>the man is wearing sunglasses.</observation>"
+        for j, content in enumerate(new_step["content"]):        
+            if content["type"] == "image":
+                content["image"] = os.path.join(dataset_root,content.pop("image_file_name")) 
+                if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
+                    if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
+                        return None, cur_max
+            
+            new_step["content"][j] = content
+        conversations.append(new_step)
+
+    return conversations, cur_max
 
 def abstract_visual_token_multiple_input_images_preprocess_function(sample):
 

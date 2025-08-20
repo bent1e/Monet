@@ -117,9 +117,8 @@ class CustomTrainerAVTStage1(SFTTrainer):
         inputs['labels'] = None #inputs['teacher_labels'] # We needn't compute the ce loss for the teacher input in this stage
         inputs['alignment_poss'] = inputs['teacher_alignment_poss']
         inputs['image_out_mask'] = inputs['teacher_image_out_mask']
-        #model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        model.gradient_checkpointing_disable()
-        #logging.info("Getting teacher reps...")
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        inputs['loss_type'] = ['ce']
         with torch.no_grad():
             teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
             
@@ -133,7 +132,7 @@ class CustomTrainerAVTStage1(SFTTrainer):
         inputs['image_out_mask'] = inputs['student_image_out_mask']
         inputs['teacher_hidden_states_for_alignment'] = teacher_outputs.hidden_states
         model.gradient_checkpointing_disable()
-        #logging.info("Computing alignment loss...")
+        inputs['loss_type'] = ['alignment']
         (alignment_loss, student_outputs) = super().compute_loss(
                 model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
             )
@@ -143,7 +142,7 @@ class CustomTrainerAVTStage1(SFTTrainer):
         inputs['ce_patch_vec'] = student_outputs.ce_patch_vec
         inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        #logging.info("Computing student ce loss...")
+        inputs['loss_type'] = ['ce']
         (student_ce_loss, student_outputs) = super().compute_loss(
                 model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
@@ -317,7 +316,7 @@ class CustomTrainerSFT(SFTTrainer):
         inputs['ce_emphasize_poss'] = inputs['observation_poss']
         # Dynamic warmup factor passed to model.forward
         inputs['ce_emphasize_factor'] = self._current_ce_emphasize_factor()
-        #print("Observation CE Factor:", inputs['ce_emphasize_factor'])
+        inputs['loss_type'] = ['ce']
         (teacher_ce_loss, teacher_outputs) = super().compute_loss(
                 model, 
                 inputs,
@@ -374,6 +373,134 @@ class CustomTrainerSFT(SFTTrainer):
         # 注意：HF Trainer 不会自动调用子类自定义的 on_epoch_end；实际汇总通过回调实现。
         return super().on_epoch_end()
 
+class CustomTrainerAVT_V2_Stage1(SFTTrainer):
+    def __init__(self, *args, **kwargs):
+        self.exp_name =kwargs.pop('exp_name')
+        # accept processing_class (preferred) and fall back to tokenizer for backward compat
+        if 'processing_class' not in kwargs and 'tokenizer' in kwargs:
+            kwargs['processing_class'] = kwargs.pop('tokenizer')
+        super().__init__(*args, **kwargs)
+        self.weight = 1.0
+        # ce_emphasize_factor warmup configuration
+        # Target factor (backward compatible with existing arg name)
+        self._ce_emphasize_target: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
+        # Optional absolute warmup steps takes precedence over ratio
+        self._ce_emphasize_warmup_steps: int = int(getattr(self.args, 'ce_emphasize_warmup_steps', 0) or 0)
+
+        # Helper: compute total training steps if needed (may be updated later, so compute on demand as well)
+        def _estimate_total_steps() -> int:
+            # Prefer TrainerState.max_steps if available and > 0
+            try:
+                if hasattr(self.state, 'max_steps') and self.state.max_steps and self.state.max_steps > 0:
+                    return int(self.state.max_steps)
+            except Exception:
+                pass
+            # Fallback to args.max_steps if provided (>0)
+            try:
+                if hasattr(self.args, 'max_steps') and self.args.max_steps and self.args.max_steps > 0:
+                    return int(self.args.max_steps)
+            except Exception:
+                pass
+            return 0
+
+        self._ce_emphasize_total_steps_hint = _estimate_total_steps()
+        # Representation analysis
+        self.rep_analyzer = None
+        args_cfg = self.args
+        if getattr(args_cfg, 'sft_analysis_enable', False):
+            self.rep_analyzer = SFTRepAnalyzer(
+                save_dir=args_cfg.sft_analysis_save_dir,
+                categories=args_cfg.sft_analysis_categories,
+                dataset_names=self.args.dataset_names,
+                exp_name=self.args.exp_name
+            )
+            if getattr(self, 'is_main_process', True):
+                logging.info(f"[SFT Analysis] Analyzer initialized. Save dir={args_cfg.sft_analysis_save_dir}; Categories={args_cfg.sft_analysis_categories}")
+            # subset selection deferred to training loop external orchestration
+        # 仅 rank‑0 进程写文件，防止多卡重复
+        self.is_main_process = (
+            not torch.distributed.is_initialized()
+            or torch.distributed.get_rank() == 0
+        )
+
+        # 日志文件路径
+        log_dir = self.args.logging_dir or "./logs"
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+        self.loss_log_path = os.path.join(log_dir, f"loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
+
+        # 如果文件不存在，就写表头
+        if self.is_main_process and not os.path.exists(self.loss_log_path):
+            with open(self.loss_log_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "global_step","epoch",
+                    "loss_teacher_ce"
+                ])
+
+    def _current_ce_emphasize_factor(self) -> float:
+        """Linear warmup from 1.0 -> target over N steps or ratio of total steps.
+
+        Priority: ce_emphasize_warmup_steps (absolute) > ce_emphasize_warmup_ratio > no warmup.
+        After warmup, clamp to target. If target <= 1.0, return target directly.
+        """
+        target = float(self._ce_emphasize_target)
+        if target == 1.0:
+            return 1.0
+
+        # Decide warmup steps
+        warmup_steps = int(self._ce_emphasize_warmup_steps or 0)
+
+        if warmup_steps <= 0:
+            # No warmup configured or cannot determine steps
+            return target
+
+        # Use current global_step (before increment) for smooth schedule in training loop
+        gs = int(getattr(self.state, 'global_step', 0) or 0)
+        progress = min(1.0, max(0.0, gs / float(max(1, warmup_steps))))
+        return float(1.0 + (target - 1.0) * progress)
+
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        """
+        Compute training loss and additionally compute token accuracies
+        """
+        inputs['latent_mode'] = True
+
+        inputs['ce_emphasize_poss'] = inputs['observation_poss']
+        # Dynamic warmup factor passed to model.forward
+        inputs['ce_emphasize_factor'] = self._current_ce_emphasize_factor()
+        inputs['loss_type'] = ['ce']
+        (teacher_ce_loss, teacher_outputs) = super().compute_loss(
+                model, 
+                inputs,
+                return_outputs=True, num_items_in_batch=num_items_in_batch
+            )
+
+        
+        outputs_teacher_loss = teacher_ce_loss.item()
+
+        del teacher_outputs
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        # --------  写本地文件  --------
+        if self.is_main_process:
+            with open(self.loss_log_path, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    self.state.global_step,
+                    self.state.epoch,
+                    outputs_teacher_loss
+                ])
+        # --------------------------------------------
+        
+        
+        return (teacher_ce_loss, None) if return_outputs else teacher_ce_loss
+
+    def on_epoch_end(self):
+        # 注意：HF Trainer 不会自动调用子类自定义的 on_epoch_end；实际汇总通过回调实现。
+        return super().on_epoch_end()
 
 import weakref
 

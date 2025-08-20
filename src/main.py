@@ -14,12 +14,19 @@ from qwen_vl_utils import process_vision_info
 import torch.distributed as dist
 from src.utils import *
 from src.task import *
-from src.trainer import CustomTrainerStage1, CustomTrainerStage2
-from src.trainer import CustomTrainerAVTStage1, CustomTrainerSFT
+from src.trainer import *
 import random
 import wandb
 seed_everything(seed=42)
 args=get_args()
+
+# Optional: enable anomaly detection when debugging in-place grad issues
+if os.environ.get("TORCH_ANOMALY", "0") == "1":
+    try:
+        torch.autograd.set_detect_anomaly(True)
+        logging.info("Enabled torch.autograd anomaly detection (TORCH_ANOMALY=1)")
+    except Exception:
+        pass
 
 # DDP-friendly logging: only rank0 writes file
 _rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")))
@@ -54,12 +61,11 @@ if _rank == 0:
     except Exception as _e:
         logging.debug(f"Processor save_pretrained skip: {_e}")
 
-if args.stage in ['avt_stage1', 'avt_sft']:
-    processor.tokenizer.add_tokens("<abs_vis_token_pad>", special_tokens=True)
-    processor.tokenizer.add_tokens("<abs_vis_token>", special_tokens=True)
-    processor.tokenizer.add_tokens("</abs_vis_token>", special_tokens=True)
-    processor.tokenizer.add_tokens("<observation>", special_tokens=True)
-    processor.tokenizer.add_tokens("</observation>", special_tokens=True)
+processor.tokenizer.add_tokens("<abs_vis_token_pad>", special_tokens=True)
+processor.tokenizer.add_tokens("<abs_vis_token>", special_tokens=True)
+processor.tokenizer.add_tokens("</abs_vis_token>", special_tokens=True)
+processor.tokenizer.add_tokens("<observation>", special_tokens=True)
+processor.tokenizer.add_tokens("</observation>", special_tokens=True)
 
 config = Qwen2_5_VLConfig.from_pretrained(args.load_model_path)
 
@@ -92,53 +98,69 @@ model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
 # Prefer non-reentrant checkpointing to avoid requires_grad warnings (when enabled)
 # Enable gradient checkpointing only on the LM/backbone (not on the frozen visual tower)
 try:
-    #if args.stage != "avt_stage1":
-    # Always disable global GC first to avoid touching the visual branch
+    # Always start from a clean state
     model.gradient_checkpointing_disable()
 
     gc_kwargs = {"use_reentrant": False}
 
-    enabled = False
-    # Qwen2.5-VL commonly exposes the backbone under one of these attributes
-    for attr in ["language_model", "transformer", "model"]:
-        sub = getattr(model, attr, None)
-        if sub is not None and hasattr(sub, "gradient_checkpointing_enable"):
-            sub.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gc_kwargs)
-            enabled = True
-            break
+    # Only enable GC for stages that need it; keep it OFF for avt_v2_stage1/2
+    if args.stage in ["avt_sft", "avt_stage1"]:
+        enabled = False
+        # Qwen2.5-VL commonly exposes the backbone under one of these attributes
+        for attr in ["language_model", "transformer", "model"]:
+            sub = getattr(model, attr, None)
+            if sub is not None and hasattr(sub, "gradient_checkpointing_enable"):
+                sub.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gc_kwargs)
+                enabled = True
+                break
 
-    # Fallback: if we didn't find a known submodule, skip enabling to avoid useless warnings
-    if not enabled:
-        logging.warning("Could not locate LM backbone to enable gradient checkpointing; leaving it disabled.")
+        if not enabled:
+            logging.warning("Could not locate LM backbone to enable gradient checkpointing; leaving it disabled.")
 
-    # Make sure embeddings create grads for checkpointed layers
-    if hasattr(model, "enable_input_require_grads"):
-        model.enable_input_require_grads()
+        # Make sure embeddings create grads for checkpointed layers
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
 
-    # HF requires use_cache=False when GC is on (you already set it above)
-    model.config.use_cache = False
+        # HF requires use_cache=False when GC is on (you already set it above)
+        model.config.use_cache = False
+    else:
+        logging.info(f"Gradient checkpointing disabled for stage: {args.stage}")
 except Exception as _e:
-    logging.debug(f"Selective gradient checkpointing skipped: {_e}")
+    logging.debug(f"Selective gradient checkpointing setup skipped: {_e}")
 
 if args.stage in ['stage1', 'avt_sft', 'avt_stage1']: 
     new_vocab_size = len(processor.tokenizer)
     model.resize_token_embeddings(new_vocab_size)
     model.config.vocab_size = new_vocab_size
 
-if args.stage in ['stage1', 'stage2']:
-    latent_token_idx = processor.tokenizer("<|latent_pad|>", return_tensors="pt")["input_ids"][0]
-    latent_start_idx = processor.tokenizer("<|latent_start|>", return_tensors="pt")["input_ids"][0]
-    latent_end_idx = processor.tokenizer("<|latent_end|>", return_tensors="pt")["input_ids"][0]
-elif args.stage in ['avt_stage1', 'avt_sft']:
-    latent_token_idx = processor.tokenizer("<abs_vis_token_pad>", return_tensors="pt")["input_ids"][0]
-    latent_start_idx = processor.tokenizer("<abs_vis_token>", return_tensors="pt")["input_ids"][0]
-    latent_end_idx = processor.tokenizer("</abs_vis_token>", return_tensors="pt")["input_ids"][0]
-    observation_start_idx = processor.tokenizer("<observation>", return_tensors="pt")["input_ids"][0]
-    observation_end_idx = processor.tokenizer("</observation>", return_tensors="pt")["input_ids"][0]
+tokenizer = processor.tokenizer
 
-model.config.latent_token_id = int(latent_token_idx)
+
+latent_start_idx = processor.tokenizer("<abs_vis_token>", return_tensors="pt")["input_ids"][0]
+latent_end_idx = processor.tokenizer("</abs_vis_token>", return_tensors="pt")["input_ids"][0]
+latent_pad_idx = processor.tokenizer("<abs_vis_token_pad>", return_tensors="pt")["input_ids"][0]
+observation_start_idx = processor.tokenizer("<observation>", return_tensors="pt")["input_ids"][0]
+observation_end_idx = processor.tokenizer("</observation>", return_tensors="pt")["input_ids"][0]
+end_pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
+answer_start_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
+img_start_idx = processor.tokenizer("<|vision_start|>", return_tensors="pt")["input_ids"][0]
+img_end_idx = processor.tokenizer("<|vision_end|>", return_tensors="pt")["input_ids"][0]
+img_pad_idx = processor.tokenizer("<|image_pad|>", return_tensors="pt")["input_ids"][0]
+SPECIAL_id = {
+    "v_start": img_start_idx,
+    "v_end": img_end_idx,
+    "img_pad": img_pad_idx,
+    "abs_start": latent_start_idx,
+    "abs_end": latent_end_idx,
+    "abs_pad": latent_pad_idx,
+    "obs_start": observation_start_idx,
+    "obs_end": observation_end_idx,
+}
+
+model.config.latent_token_id = int(latent_pad_idx)
 model.config.latent_start_id = int(latent_start_idx)
 model.config.latent_end_id = int(latent_end_idx)
+model.config.answer_start_pattern = answer_start_pattern
 
 for param in model.visual.parameters():
     param.requires_grad = False
@@ -215,38 +237,29 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
         batch_assistant_img_token_lens.append(batch_assistant_img_token_lens_merged[start:start+assistant_img_cnts])
         start += assistant_img_cnts
 
-    latent_token_idx = processor.tokenizer("<abs_vis_token_pad>", return_tensors="pt")["input_ids"][0]
-    latent_start_idx = processor.tokenizer("<abs_vis_token>", return_tensors="pt")["input_ids"][0]
-    latent_end_idx = processor.tokenizer("</abs_vis_token>", return_tensors="pt")["input_ids"][0]
-    img_pad_token_idx = processor.tokenizer("<|image_pad|>", return_tensors="pt")["input_ids"][0]
-    end_pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
-
-
-    answer_start_token_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
-
     # <|latent_start|><|image_pad|><|latent_end|> -> <|latent_start|><|latent_pad|>...<|latent_end|>; pad the sequences to the same length
     batch["student_input_ids"], batch["student_attention_mask"] = process_batch(student_batch["input_ids"], student_batch["attention_mask"], 
-                                                      latent_start_idx, latent_end_idx, latent_token_idx, args.min_latent_size, 
+                                                      latent_start_idx, latent_end_idx, latent_pad_idx, args.min_latent_size, 
                                                       args.min_latent_compress_factor, args.max_latent_compress_factor,
                                                       end_pad_token_idx, batch_assistant_img_token_lens)
     
     #if (batch["student_input_ids"]==151655).sum()==1472:
     #    pass
         
-    batch["teacher_input_ids"] = teacher_batch["input_ids"] #replace_assistant_image_pad_with_latent_pad(teacher_batch["input_ids"], answer_start_token_pattern, img_pad_token_idx, latent_token_idx)
+    batch["teacher_input_ids"] = teacher_batch["input_ids"] #replace_assistant_image_pad_with_latent_pad(teacher_batch["input_ids"], answer_start_pattern, img_pad_idx, latent_pad_idx)
     batch["teacher_attention_mask"] = teacher_batch["attention_mask"]
 
     if alignment == "observation_end":
         alignment_pattern = observation_end_idx
-        batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, alignment_pattern)
-        batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, alignment_pattern)
+        batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, alignment_pattern)
+        batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, alignment_pattern)
     elif alignment == "boxed_start":
         alignment_pattern = [processor.tokenizer("\\boxed{", return_tensors="pt")["input_ids"][0], processor.tokenizer(" \\boxed{", return_tensors="pt")["input_ids"][0]]
-        batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, alignment_pattern)
-        batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, alignment_pattern)
+        batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, alignment_pattern)
+        batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, alignment_pattern)
     elif alignment == "observation_all":
-        student_observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, observation_start_idx)
-        student_observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, observation_end_idx)
+        student_observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
+        student_observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
         batch["student_alignment_poss"] = []
         assert len(student_observation_start_poss) == len(student_observation_end_poss)
         for start_poss, end_poss in zip(student_observation_start_poss, student_observation_end_poss):
@@ -256,8 +269,8 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
                 for start, end in zip(start_poss, end_poss):
                     poss_of_a_sample.extend(list(range(start, end + 1)))
             batch["student_alignment_poss"].append(poss_of_a_sample)
-        teacher_observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, observation_start_idx)
-        teacher_observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, observation_end_idx)
+        teacher_observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
+        teacher_observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
         batch["teacher_alignment_poss"] = []
         assert len(teacher_observation_start_poss) == len(teacher_observation_end_poss)
         for start_poss, end_poss in zip(teacher_observation_start_poss, teacher_observation_end_poss):
@@ -268,8 +281,8 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
                     poss_of_a_sample.extend(list(range(start, end + 1)))
             batch["teacher_alignment_poss"].append(poss_of_a_sample)
 
-    latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, latent_start_idx)
-    latent_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_token_pattern, latent_end_idx)
+    latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_start_idx)
+    latent_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_end_idx)
     batch["ce_emphasize_poss"] = []
     for start_poss, end_poss in zip(latent_start_poss, latent_end_poss):
         poss_of_a_sample = []
@@ -280,16 +293,16 @@ def collate_fn_avt_stage1(examples, alignment="boxed_start"):
         batch["ce_emphasize_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_token_pattern, ignore_ids=[end_pad_token_idx, latent_token_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx])
 
     # We needn't compute the ce loss for the teacher 
-    #batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, end_pad_token_idx, img_pad_token_idx)
+    #batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_pattern, end_pad_token_idx, img_pad_idx)
 
     # return a mask where tokens of <|latent_pad|> are 1, else 0
-    batch["student_image_out_mask"] = mask_image_output_tokens(batch["student_input_ids"], latent_start_idx, latent_token_idx)
+    batch["student_image_out_mask"] = mask_image_output_tokens(batch["student_input_ids"], latent_start_idx, latent_pad_idx)
 
     # return a mask where tokens of <|image_pad|> are 1, else 0
-    batch["teacher_image_out_mask"] = mask_image_output_tokens(batch["teacher_input_ids"], latent_start_idx, img_pad_token_idx)
+    batch["teacher_image_out_mask"] = mask_image_output_tokens(batch["teacher_input_ids"], latent_start_idx, img_pad_idx)
 
     return batch
 
@@ -314,17 +327,13 @@ def collate_fn_avt_sft(examples):
     batch['sample_id'] = torch.tensor(sample_ids, dtype=torch.long)
     batch['user_assistant_pixel_values'] = teacher_batch['pixel_values']
     batch['user_assistant_image_grid_thw'] = teacher_batch['image_grid_thw']
-    img_pad_token_idx = processor.tokenizer("<|image_pad|>", return_tensors="pt")["input_ids"][0]
-    end_pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
-    img_pad_start_idx = processor.tokenizer("<|vision_start|>", return_tensors="pt")["input_ids"][0]
-    img_pad_end_idx = processor.tokenizer("<|vision_end|>", return_tensors="pt")["input_ids"][0]
-    answer_start_token_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
+
     batch["teacher_input_ids"] = teacher_batch["input_ids"]
     batch["teacher_attention_mask"] = teacher_batch["attention_mask"]
     alignment_pattern = [processor.tokenizer("\\boxed{", return_tensors="pt")["input_ids"][0], processor.tokenizer(" \\boxed{", return_tensors="pt")["input_ids"][0]]
-    batch["boxed_start_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, alignment_pattern)
-    teacher_observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, observation_start_idx)
-    teacher_observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_token_pattern, observation_end_idx)
+    batch["boxed_start_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, alignment_pattern)
+    teacher_observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
+    teacher_observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
     batch["observation_poss"] = []
     assert len(teacher_observation_start_poss) == len(teacher_observation_end_poss)
     for start_poss, end_poss in zip(teacher_observation_start_poss, teacher_observation_end_poss):
@@ -334,7 +343,7 @@ def collate_fn_avt_sft(examples):
             for start, end in zip(start_poss, end_poss):
                 poss_of_a_sample.extend(list(range(start, end + 1)))
         batch["observation_poss"].append(poss_of_a_sample)
-    batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_token_pattern, ignore_ids=[end_pad_token_idx, img_pad_token_idx, img_pad_start_idx, img_pad_end_idx])
+    batch["teacher_labels"] = generate_labels_after_multi_token_start(batch["teacher_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, img_pad_idx, img_start_idx, img_end_idx])
 
     if (batch["teacher_labels"] != -100).sum().item() == 0:
         raise RuntimeError("No supervised tokens found; check chat template / start pattern.")
@@ -348,6 +357,48 @@ def collate_fn_avt_sft(examples):
         valid_indices = [int(i) for i in torch.nonzero(teacher_labels[b] != -100, as_tuple=False).flatten().tolist() if i not in obs_set]
         non_obs_poss.append(valid_indices)
     batch["non_observation_poss"] = non_obs_poss
+    return batch
+
+def collate_fn_avt_v2_stage1(examples, alignment="boxed_start"):
+    batch_assistant_img_cnts = [sum(1 for step in example[2]['content'] if step["type"] == "image") for example in examples]
+    texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
+
+    # replace `<abs_vis_token></abs_vis_token>`` with `<|vision_start|><|image_pad|><|vision_end|>`` for each `<|im_start|>assistant`` content
+    texts = [place_output_image_avt(text) for text in texts]
+    
+    # add `<abs_vis_token><abs_vis_token_pad>...</abs_vis_token>` after each `<|vision_start|><|image_pad|><|vision_end|>` for each `<|im_start|>assistant` content
+    student_texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
+    
+    image_inputs, _ = process_vision_info(examples)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+
+    total_image_pads = 0
+    for txt in student_texts:
+        total_image_pads += txt.count("<|vision_start|><|image_pad|>")
+    assert total_image_pads == len(image_inputs)
+    batch = processor(text=student_texts, images=image_inputs, return_tensors="pt", padding=True)
+
+    batch["attention_mask_4d"] = {"full_attention": build_additive_bias(
+        input_ids=batch["input_ids"],
+        pad_mask=batch["attention_mask"],
+        token_ids=SPECIAL_id,
+        large_neg=-1e5,
+    ).to(next(model.parameters()).dtype) }
+    
+    observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_end_idx)
+    batch["observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start, end + 1)))
+        batch["observation_poss"].append(poss_of_a_sample)
+
+    batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, img_pad_idx])
+
     return batch
 
 
@@ -389,35 +440,53 @@ if args.stage == 'avt_sft':
 else:
     wrapped_dataset = None
 
-
-exp_name = f"ep{args.epochs}-bsz{args.bsz}-lr{1e-5}"
-if args.stage == 'avt_stage1':
-    exp_name += f"-{args.min_latent_size}-{args.min_latent_compress_factor}-{args.max_latent_compress_factor}-wt{args.alignment_weight}-ce_emphasize_{args.ce_emphasize_factor}"
-    exp_name = f"{args.alignment}-" + exp_name
-exp_name = args.stage+'-'+exp_name
-if args.shuffle_train:
-    exp_name += "-shuffle"
 dataset_names = ""
 for data_path in args.data_path:
     dataset_name = data_path.split("/")[-2]
     dataset_names += f"-{dataset_name}"
+
+# Automatically construct save name with the hyperparameters
+exp_name = f"{args.stage}-ep{args.epochs}-bsz{args.bsz}-lr{1e-5}"
+
+if args.stage == 'avt_stage1':
+    exp_name += f"-{args.min_latent_size}-{args.min_latent_compress_factor}-{args.max_latent_compress_factor}-wt{args.alignment_weight}-ce_emphasize_{args.ce_emphasize_factor}"
+    exp_name = f"{args.alignment}-" + exp_name
+
 if args.stage == "avt_sft":
     exp_name += f"-ce_emphasize_{args.ce_emphasize_factor}-warmup_{args.ce_emphasize_warmup_steps}"
+
+
+
+if args.shuffle_train:
+    exp_name += "-shuffle"
 
 save_dir = f"./checkpoints/{exp_name}"
 if args.save_model_path != './checkpoints/':
     save_dir = args.save_model_path
 
-if args.stage in ['avt_stage1']:
+if args.stage == 'avt_stage1':
     CustomTrainer = CustomTrainerAVTStage1
     collate_fn = partial(collate_fn_avt_stage1, alignment=args.alignment)
 elif args.stage == 'avt_sft':
     CustomTrainer = CustomTrainerSFT
     collate_fn = partial(collate_fn_avt_sft)
-# 
+elif args.stage == 'avt_v2_stage1':
+    CustomTrainer = CustomTrainerAVT_V2_Stage1
+    collate_fn = partial(collate_fn_avt_v2_stage1)
+
+
 if args.deepspeed != "":
     print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
 is_parallel = int(os.environ.get("WORLD_SIZE", "1")) > 1
+if args.stage == 'avt_v2_stage1': 
+    gradient_checkpointing = False
+elif args.stage == 'avt_v2_stage2':
+    gradient_checkpointing = False
+elif args.stage == 'avt_sft':
+    gradient_checkpointing = True
+elif args.stage == 'avt_stage1':
+    gradient_checkpointing = True
+
 training_args = SFTConfig(
     output_dir=save_dir,
     num_train_epochs=args.epochs,
@@ -434,7 +503,7 @@ training_args = SFTConfig(
     bf16=True,
     push_to_hub=False,
     remove_unused_columns=False,
-    gradient_checkpointing=True, #False if args.stage == "avt_stage1" else True,
+    gradient_checkpointing=gradient_checkpointing, #False if args.stage == "avt_stage1" else True,
     dataset_text_field="",
     dataset_kwargs={"skip_prepare_dataset": True},
     report_to=['wandb'] if args.wandb_name is not None else [],
@@ -465,6 +534,9 @@ if args.stage == 'avt_sft':
 elif args.stage == 'avt_stage1':
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
     setattr(training_args, 'alignment_weight', args.alignment_weight)
+elif args.stage == 'avt_v2_stage1':
+    setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
+    setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(

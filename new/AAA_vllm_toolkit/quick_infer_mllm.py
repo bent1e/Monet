@@ -3,6 +3,11 @@ model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct'
 
 model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-avt_sft-shuffle-obs-ce-factor-2.0'
 model_path = '/home/dids/shiyang/checkpoints/08_15-avt_stage1-6-30-40-wt1.0-ep2'
+model_path = '/home/dids/shiyang/codes/abstract-visual-token/checkpoints/avt_stage1-observation_all-ep2-bsz1-lr1e-05-6-30-40-wt2.0/checkpoint-482'
+model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-08_15-avt_stage1-6-30-40-wt1.0-ep5'
+model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-08_15-avt_stage1-6-30-40-wt2.0-ep5'
+model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-08_15-avt_stage1-6-30-40-wt1.0-ep2'
+model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-avt_stage1-08_17-6-20-30-wt1.0-ce_emphasize3.0'
 import PIL.Image
 #import new.avt_qwen_model.vllm.apply_qwen2_5_avt_gpu_model_runner
 from new.AAA_vllm_toolkit.load_and_gen_vllm import *
@@ -20,17 +25,30 @@ def main():
         # inputs = vllm_mllm_process_single_data("Describe this image in detail.", image_path='/data1/qxwang/codes/Mirage/new/debug_1.jpg', mllm_dir=model_path)
         os.environ['ABS_VIS_START_ID'] = str(processor.tokenizer.encode('<|vision_start|>')[0])
         os.environ['ABS_VIS_END_ID'] = str(processor.tokenizer.encode('<|vision_end|>')[0])
-        conversation = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Question: What is the Potassium in Broccoli, frozen (0)?\nAnswer the question using a single word or phrase.\nPut your final answer within \\boxed{}. If you cannot see relevant visual information to infer the answer from the image, just output \\boxed{None} and don't guess the answer based on your knowledge."},
-                    {"type": "image", "image": PIL.Image.open('/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/CoF/images/7_0.jpg').convert("RGB")}
-                ]
-            }
+        
+
+        conversations = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Question: What's the number on the T-shirt of the man that is closest to the camera? \nPut your final answer within \\boxed{}. You can generate abstract visual tokens that represent a cropped image region or images with auxiliary information like lines, bounding boxes, etc. When you decide to generate abstract visual tokens, put them in <abs_vis_token>...</abs_vis_token>."},
+                        {"type": "image", "image": PIL.Image.open('/home/dids/shiyang/datasets/CoMDataset/images/TDIUC/MSCOCO2014_train2014_COCO_train2014_000000000795.jpg').convert("RGB")}
+                    ]
+                }
+            ],
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Question: What are written on the bus? \nPut your final answer within \\boxed{}. You can generate abstract visual tokens that represent a cropped image region or images with auxiliary information like lines, bounding boxes, etc. When you decide to generate abstract visual tokens, put them in <abs_vis_token>...</abs_vis_token>."},
+                        {"type": "image", "image": PIL.Image.open('/home/dids/shiyang/datasets/CoMDataset/images/TDIUC/MSCOCO2014_train2014_COCO_train2014_000000000471.jpg').convert("RGB")}
+                    ]
+                }
+            ],
         ]
 
-        inputs = vllm_mllm_process_batch_from_messages([conversation], processor)
+        inputs = vllm_mllm_process_batch_from_messages(conversations, processor)
         output = vllm_generate(inputs, sampling_params, mllm)
         print(output[0].outputs[0].text)
 

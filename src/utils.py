@@ -9,13 +9,14 @@ from datasets import Dataset
 from typing import List, Union
 import math
 from PIL import Image
+import math
 
 def get_args():
     parser = argparse.ArgumentParser()
     # ===== Basic arguments =====
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/model_stage1')
     parser.add_argument("--data_path", type=str, default='PathToJsonlData', nargs='+')
-    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1'])
+    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1', 'avt_v2_stage1', 'avt_v2_stage2'])
     parser.add_argument("--task", type=str, default="vsp-spatial-reasoning", choices=["vsp-spatial-reasoning", "vsp-spatial-planning", "blink-jigsaw", "sat", "mm-reasoning"])
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/',help="Path to save the model checkpoints.")
     parser.add_argument("--resume_from_checkpoint", default=False, action="store_true")
@@ -169,13 +170,23 @@ def replace_visual_spectial_tokens(texts):
     return update_texts
 
 def replace_visual_spectial_tokens_avt(texts):
-
     update_texts = []
     for i, text in enumerate(texts):
         turns = text.split("<|im_start|>assistant")
         upd_text = turns[0]
         for turn in turns[1:]:
             upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", "<abs_vis_token><|image_pad|></abs_vis_token>")
+        update_texts.append(upd_text)
+    return update_texts
+
+def add_abs_vis_token_after_helper_img(texts, latent_size, latent_pad_str="<abs_vis_token_pad>"):
+    update_texts = []
+    latent_pad_strs = latent_pad_str*latent_size
+    for i, text in enumerate(texts):
+        turns = text.split("<|im_start|>assistant")
+        upd_text = turns[0]
+        for turn in turns[1:]:
+            upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"<|vision_start|><|image_pad|><|vision_end|><abs_vis_token>{latent_pad_strs}</abs_vis_token>")
         update_texts.append(upd_text)
     return update_texts
 
@@ -329,7 +340,8 @@ def process_batch(
 
     return new_input_ids, new_attention_mask
 
- 
+
+
 def replace_assistant_image_pad_with_latent_pad(
     input_ids: torch.Tensor,
     start_token_pattern: torch.Tensor,
@@ -765,3 +777,164 @@ class SFTRepAnalyzer:
 
     def save_state(self):
         torch.save({'subset_ids': self.subset_ids}, os.path.join(self.exp_save_folder, 'state.pt'))
+
+
+def find_segments_1d(ids, token_ids):
+    """
+    ids: 1D LongTensor, shape [L]
+    token_ids: dict with keys:
+        'v_start', 'v_end', 'img_pad',
+        'abs_start', 'abs_end', 'abs_pad',
+        'obs_start', 'obs_end'
+    Returns: list of tuples for each S_i:
+        (I_idx: LongTensor, A_idx: LongTensor, O_idx: LongTensor)
+        O_idx may be empty if no <observation>...</observation> in T_i
+    """
+    L = ids.numel()
+    I_segments, A_segments, O_segments = [], [], []
+
+    # Helper to collect indices between two tags (exclusive) that match 'wanted_id' (or all if None)
+    def between(start_pos, end_pos, wanted_id=None):
+        s = start_pos + 1
+        e = end_pos
+        if s >= e: 
+            return torch.empty(0, dtype=torch.long, device=ids.device)
+        if wanted_id is None:
+            idx = torch.arange(s, e, device=ids.device)
+        else:
+            mask = (ids[s:e] == wanted_id)
+            idx = torch.nonzero(mask, as_tuple=False).squeeze(-1) + s
+        return idx
+
+    # 1) Parse all I_i by pairing <|vision_start|> ... <|vision_end|>
+    v_starts = torch.nonzero(ids == token_ids['v_start'], as_tuple=False).squeeze(-1)
+    v_ends   = torch.nonzero(ids == token_ids['v_end'],   as_tuple=False).squeeze(-1)
+
+    # Greedy pairing in order
+    v_ptr, e_ptr = 0, 0
+    Vs, Ve = [], []
+    while v_ptr < v_starts.numel() and e_ptr < v_ends.numel():
+        if v_starts[v_ptr] < v_ends[e_ptr]:
+            Vs.append(v_starts[v_ptr].item()); Ve.append(v_ends[e_ptr].item())
+            v_ptr += 1; e_ptr += 1
+        else:
+            e_ptr += 1
+    Vs = Vs[1:] # Remove the question image
+    Ve = Ve[1:] # Remove the question image
+
+    # 2) Parse all A_i by pairing <abs_vis_token> ... </abs_vis_token>
+    a_starts = torch.nonzero(ids == token_ids['abs_start'], as_tuple=False).squeeze(-1)
+    a_ends   = torch.nonzero(ids == token_ids['abs_end'],   as_tuple=False).squeeze(-1)
+    As, Ae = [], []
+    a_ptr, b_ptr = 0, 0
+    while a_ptr < a_starts.numel() and b_ptr < a_ends.numel():
+        if a_starts[a_ptr] < a_ends[b_ptr]:
+            As.append(a_starts[a_ptr].item()); Ae.append(a_ends[b_ptr].item())
+            a_ptr += 1; b_ptr += 1
+        else:
+            b_ptr += 1
+
+    # 3) For each (I_i, A_i) in order, find O_i within T_i
+    S = []
+    for i in range(min(len(Vs), len(As))):
+        vs, ve = Vs[i], Ve[i]
+        as_, ae = As[i], Ae[i]
+
+        I_idx = between(vs, ve, wanted_id=token_ids['img_pad'])
+        A_idx = between(as_, ae, wanted_id=token_ids['abs_pad'])
+
+        # T_i is from ae to next vision_start (or end of sequence)
+        t_end = Vs[i+1] if i + 1 < len(Vs) else L
+        # Find all <observation>...</observation> fully inside T_i
+        obs_starts = torch.nonzero((ids == token_ids['obs_start']) & (torch.arange(L, device=ids.device) >= ae) & (torch.arange(L, device=ids.device) < t_end), as_tuple=False).squeeze(-1)
+        obs_ends   = torch.nonzero((ids == token_ids['obs_end'])   & (torch.arange(L, device=ids.device) >  ae) & (torch.arange(L, device=ids.device) <= t_end), as_tuple=False).squeeze(-1)
+
+        # Pair obs tags in order
+        O_all = []
+        p, q = 0, 0
+        while p < obs_starts.numel() and q < obs_ends.numel():
+            if obs_starts[p] < obs_ends[q]:
+                # tokens between the two tags (exclusive) belong to O_i
+                O_idx = between(obs_starts[p].item(), obs_ends[q].item(), wanted_id=None)
+                if O_idx.numel():
+                    O_all.append(O_idx)
+                p += 1; q += 1
+            else:
+                q += 1
+
+        O_idx = torch.cat(O_all, dim=0) if len(O_all) else torch.empty(0, dtype=torch.long, device=ids.device)
+        S.append((I_idx, A_idx, O_idx))
+
+    return S
+
+
+def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
+    """
+    input_ids: LongTensor [B, L]
+    pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
+    token_ids: dict of special token ids (see above)
+    large_neg: float used as "negative infinity" added to logits
+
+    Returns:
+      attn_bias: FloatTensor [B, 1, L, L] with 0 for allowed and large_neg for blocked
+                 This bias ALREADY includes causal mask and padding mask.
+    """
+    input_ids = input_ids.cpu()
+    pad_mask = pad_mask.cpu()
+    
+    B, L = input_ids.shape
+    device = input_ids.device
+    dtype_bias = torch.float32  # keep in fp32 for numerical safety; model will cast internally
+
+    # Base: causal visibility (lower-triangular including diagonal)
+    causal = torch.tril(torch.ones((L, L), dtype=torch.bool, device=device))
+
+    # Start from causal AND valid tokens (both query & key must be valid)
+    valid = pad_mask.bool()
+    allowed = causal.unsqueeze(0).clone()  # [1, L, L]
+    allowed = allowed.repeat(B, 1, 1)      # [B, L, L]
+    for b in range(B):
+        allowed[b] &= valid[b].unsqueeze(0)  # mask keys
+        allowed[b] &= valid[b].unsqueeze(1)  # mask queries
+
+    # Apply per-segment constraints
+    for b in range(B):
+        segs = find_segments_1d(input_ids[b], token_ids)
+        if not segs:
+            continue
+
+        Lb = input_ids.shape[1]
+        all_idx = torch.arange(Lb, device=device)
+
+        for (I_idx, A_idx, O_idx) in segs:
+            if A_idx.numel():
+                # 1) A_i only sees I_i
+                allowed[b][A_idx, :] = False
+                if I_idx.numel():
+                    allowed[b][A_idx.unsqueeze(1), I_idx] = True
+
+                # 2) Only A_i can see I_i (mask I_i keys for all non-A queries)
+                if I_idx.numel():
+            # Build row index set of "not in A_i"
+                    not_A = torch.ones(Lb, dtype=torch.bool, device=device)
+                    not_A[A_idx] = False
+                    not_A_idx = torch.nonzero(not_A, as_tuple=False).squeeze(-1)  # [R]
+                    if not_A_idx.numel():
+                        # Block (rows in not_A_idx, cols in I_idx)
+                        allowed[b][not_A_idx[:, None], I_idx] = False
+
+            if O_idx.numel() and A_idx.numel():
+                # 3) O_i only sees A_i
+                allowed[b][O_idx, :] = False
+                allowed[b][O_idx.unsqueeze(1), A_idx] = True
+
+            if I_idx.numel():
+                # Optional safety: restrict I_i queries to themselves only (identity)
+                allowed[b][I_idx, :] = False
+                allowed[b][I_idx, I_idx] = True
+
+    # Convert to additive bias: 0 for allowed, large_neg for masked
+    attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)
+    mask_4d = (~allowed).unsqueeze(1)           # [B, 1, L, L]
+    attn_bias = attn_bias.masked_fill(mask_4d, large_neg)
+    return (attn_bias >= 0) #attn_bias
