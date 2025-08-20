@@ -145,7 +145,7 @@ export TOKENIZERS_PARALLELISM=false
 torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --epochs 2 \
     --bsz 1 \
-    --grad_accum_steps 1 \
+    --grad_accum_steps 16 \
     --task "mm-reasoning" \
     --stage "avt_v2_stage1" \
     --data_path \

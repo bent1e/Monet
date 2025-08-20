@@ -1396,49 +1396,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                     ))
                 return shapes
 
-            # English comments only in Python per your preference
-            def any_grad_in_kv(pkv):
-                if pkv is None: return False
-                if hasattr(pkv, "layers"):
-                    for layer in pkv.layers:
-                        for t in (getattr(layer, "keys", None), getattr(layer, "values", None)):
-                            if isinstance(t, torch.Tensor) and t.requires_grad:
-                                return True
-                    return False
-                if isinstance(pkv, (tuple, list)):
-                    for layer in pkv:
-                        for t in layer:
-                            if isinstance(t, torch.Tensor) and t.requires_grad:
-                                return True
-                    return False
-                return False
-
-            # --- （可选）文本子段的微分块：默认为 0=关闭；如仍 OOM，改为 256/384/512 ---
-            TEXT_Q_CHUNK = 0
-
-            
-            from contextlib import nullcontext
-
-            def yield_image_text_subsegments(image_mask_row: torch.BoolTensor,
-                                            start: int, end: int):
-                """
-                输入一个大段 [start, end)，根据 image_mask 切成若干个子段：
-                - 对每个子段返回 (sub_start, sub_end, only_image: bool)
-                """
-                assert 0 <= start <= end <= image_mask_row.numel()
-                if start == end:
-                    return
-                i = start
-                while i < end:
-                    # 当前位置的类型
-                    cur_is_img = bool(image_mask_row[i].item())
-                    j = i + 1
-                    # 扩展到相同类型的连续块
-                    while j < end and bool(image_mask_row[j].item()) == cur_is_img:
-                        j += 1
-                    yield (i, j, cur_is_img)
-                    i = j
-
 
             def run_segment_forward(language_model,
                         seg_embeds, seg_pos_ids, seg_att_m,
@@ -1446,19 +1403,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         need_hidden: bool,
                         no_grad_mode: bool,
                         **kwargs):
-                """
-                language_model: 你的 self.language_model
-                seg_embeds:  (1, q, H)
-                seg_pos_ids: (3, 1, q)  # 按你的 Qwen2.5-VL 位置编码形状
-                seg_att_m:   dict 或 None （4D mask：{'full_attention': [1,1,q,k] }）
-                past_kv:     cache
-                need_hidden: 是否需要返回 hidden_states（用于 alignment）
-                no_grad_mode: True 则用 torch.no_grad()
-                """
-                ctx = torch.no_grad() if no_grad_mode else nullcontext()
 
-                # 如果能不用 4D mask（例如纯图像 prefill 严格因果且无需结构稀疏），考虑置 None 以启用 Flash：
-                # if no_grad_mode and can_drop_4d_mask(seg_att_m): seg_att_m = None
+                ctx = torch.no_grad() if no_grad_mode else nullcontext()
 
                 with ctx:
                     out = language_model(
@@ -1474,10 +1420,11 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                     )
                 return out
 
-            def _first_pattern_end(row_ids: torch.LongTensor, pattern_ids: torch.Tensor) -> int:
+            def _first_pattern_end(row_ids: torch.LongTensor, pattern_ids: List[int]) -> int:
                 # 1D unfold 做滑窗匹配
+                pattern_ids = torch.tensor(pattern_ids, dtype=row_ids.dtype, device=row_ids.device)
                 wins = row_ids.unfold(0, pattern_ids.numel(), 1)  # [L-M+1, M]
-                eq = (wins == pattern_ids.to(wins.device)).all(dim=-1)
+                eq = (wins == pattern_ids).all(dim=-1)
                 idx = torch.nonzero(eq, as_tuple=False)
                 if idx.numel() == 0:
                     return 0
@@ -1505,7 +1452,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             # ------------------------------------------------------------------
             # 2.  Iterate samples
             # ------------------------------------------------------------------   
-            TEXT_Q_CHUNK = 0
+
             for b in range(batch_size):
                 latent_pos   = latent_lists[b]
                 align_pos    = sorted(alignment_poss[b])        # assumption: 递增
@@ -1592,78 +1539,42 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                                 )
                                 return out
 
-                            if TEXT_Q_CHUNK and (cut - s) > TEXT_Q_CHUNK:
-                                # 可选：把文本 Q 轴微分块，进一步降显存（不是找 image 的循环）
-                                q = s
-                                while q < cut:
-                                    qn = min(q + TEXT_Q_CHUNK, cut)
-                                    out = _run_text_chunk(q, qn, qn, past_kv)
-                                    # 收集对齐（只收集 [q, qn)）
-                                    if teacher_hidden_states_for_alignment is not None:
-                                        num_layers = len(out.hidden_states)
-                                        if hidden_states_layers is None:
-                                            hidden_states_layers = [[[] for _ in range(batch_size)] for _ in range(num_layers)]
-                                        teacher_align_poss = []
-                                        while align_ptr < len(align_pos) and align_pos[align_ptr] < qn:
-                                            if align_pos[align_ptr] >= q:
-                                                p = align_pos[align_ptr]
-                                                offset = p - q
-                                                for l in range(num_layers):
-                                                    vec = out.hidden_states[l][0, offset, :].flatten()
-                                                    hidden_states_layers[l][b].append(vec)
-                                                teacher_align_poss.append(align_ptr)
-                                            align_ptr += 1
-                                        # 计算段内对齐损失
-                                        if len(teacher_align_poss) > 0:
-                                            l_b = alignment_loss(
-                                                teacher_hidden_states_for_alignment,
-                                                [torch.stack(hid, dim=0) if len(hid[b])>0 else torch.empty(0, device=device, dtype=dtype)
-                                                for hid in hidden_states_layers],
-                                                b,
-                                                teacher_align_poss
-                                            )
-                                            align_losses_this_b.append(l_b)
 
-                                    # 写回 & detach KV
-                                    batch_last_hidden_state[b, q:qn, :] = out.last_hidden_state[0]
-                                    past_kv = detach_past_kv(out.past_key_values)
-                                    q = qn
-                            else:
-                                #print(f"Forward {cut-s} text tokens, grad enabled, modified attention")
-                                out = _run_text_chunk(s, cut, cut, past_kv)
-                                if teacher_hidden_states_for_alignment is not None:
-                                    num_layers = len(out.hidden_states)
-                                    if hidden_states_layers is None:
-                                        hidden_states_layers = [[[] for _ in range(batch_size)] for _ in range(num_layers)]
-                                    teacher_align_poss = []
-                                    while align_ptr < len(align_pos) and align_pos[align_ptr] < cut:
-                                        p = align_pos[align_ptr]
-                                        offset = p - s
-                                        for l in range(num_layers):
-                                            vec = out.hidden_states[l][0, offset, :].flatten()
-                                            hidden_states_layers[l][b].append(vec)
-                                        teacher_align_poss.append(align_ptr)
-                                        align_ptr += 1
-                                    if len(teacher_align_poss) > 0:
-                                        l_b = alignment_loss(
-                                            teacher_hidden_states_for_alignment,
-                                            [torch.stack(hid, dim=0) if len(hid[b])>0 else torch.empty(0, device=device, dtype=dtype)
-                                            for hid in hidden_states_layers],
-                                            b,
-                                            teacher_align_poss
-                                        )
-                                        align_losses_this_b.append(l_b)
+                            #print(f"Forward {cut-s} text tokens, grad enabled, modified attention")
+                            out = _run_text_chunk(s, cut, cut, past_kv)
+                            if teacher_hidden_states_for_alignment is not None:
+                                num_layers = len(out.hidden_states)
+                                if hidden_states_layers is None:
+                                    hidden_states_layers = [[[] for _ in range(batch_size)] for _ in range(num_layers)]
+                                teacher_align_poss = []
+                                while align_ptr < len(align_pos) and align_pos[align_ptr] < cut:
+                                    p = align_pos[align_ptr]
+                                    offset = p - s
+                                    for l in range(num_layers):
+                                        vec = out.hidden_states[l][0, offset, :].flatten()
+                                        hidden_states_layers[l][b].append(vec)
+                                    teacher_align_poss.append(align_ptr)
+                                    align_ptr += 1
+                                if len(teacher_align_poss) > 0:
+                                    l_b = alignment_loss(
+                                        teacher_hidden_states_for_alignment,
+                                        [torch.stack(hid, dim=0) if len(hid[b])>0 else torch.empty(0, device=device, dtype=dtype)
+                                        for hid in hidden_states_layers],
+                                        b,
+                                        teacher_align_poss
+                                    )
+                                    align_losses_this_b.append(l_b)
 
-                                batch_last_hidden_state[b, s:cut, :] = out.last_hidden_state[0]
-                                past_kv = detach_past_kv(out.past_key_values)
+                            batch_last_hidden_state[b, s:cut, :] = out.last_hidden_state[0]
+                            past_kv = detach_past_kv(out.past_key_values)
 
                         # 3) image 尾段（no_grad，只产 KV；默认把 4D mask 关掉进一步省显存）
                         if cut < e:
                             img_embeds  = seq_embeds[:, cut:e, :].detach()
                             img_pos_ids = pos_ids_s[:, :, cut:e]
                             # 如需严格结构可见性，改回：
-                            img_att_m = {'full_attention': attn_mask_s['full_attention'][:, :, cut:e, :e].clone()}
-                            #img_att_m = None  # 因果 SDPA，显著省显存
+                            #img_att_m = {'full_attention': attn_mask_s['full_attention'][:, :, cut:e, :e].clone()}
+                            img_att_m = None  # 因果 SDPA，显著省显存
                             #print(f"Forward {e-cut} image tokens, no_grad, default causal attention")
                             img_out = run_segment_forward(
                                 language_model=self.language_model,
@@ -1697,18 +1608,18 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         )
                     else:
                         prev_hidden = batch_last_hidden_state[b, pos - 1, :].view(1, 1, -1)
-                        latent_embed = prev_hidden.detach() if self.training else prev_hidden.detach() # grad norm exploding
+                        latent_embed = prev_hidden if self.training else prev_hidden.detach() # grad norm exploding
                         #latent_embed = prev_hidden.detach() # grad norm not exploding
                         #latent_embed = prev_hidden.detach() + (prev_hidden - prev_hidden.detach()) # STE
                         ce_patch_pos[b].append(pos)
-                        ce_patch_vec[b].append(latent_embed[0, 0].detach())
+                        ce_patch_vec[b].append(latent_embed[0, 0])
 
                     step_pos_ids = pos_ids_s[:, :, pos : pos + 1]
                     step_att_m   = {'full_attention': attn_mask_s['full_attention'][:, :, pos:pos+1, : pos + 1].clone()} if attn_mask_s is not None else None
                     #print("[Latent seg - before forward] ", cache_kv_shapes(past_kv))
                     step_out = self.language_model(
                         input_ids=None,
-                        inputs_embeds=latent_embed,
+                        inputs_embeds=latent_embed.detach(),
                         position_ids=step_pos_ids,
                         attention_mask=step_att_m,
                         past_key_values=past_kv,
@@ -2013,7 +1924,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])
 
-        loss = None
+        loss = 0
         if "ce" in loss_type:
             # Optional: apply per-token weighting on ce_emphasize_poss
             use_weight = (

@@ -908,10 +908,23 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
 
         for (I_idx, A_idx, O_idx) in segs:
             if A_idx.numel():
-                # 1) A_i only sees I_i
                 allowed[b][A_idx, :] = False
+
+                # ① A 段能看见紧左侧的 I 段所有位置
                 if I_idx.numel():
+                    # 形状广播: (|A|,1) × (|I|,) -> (|A|, |I|)
                     allowed[b][A_idx.unsqueeze(1), I_idx] = True
+
+                # ② A 段“前缀自可见”（当前位置及以前的全部 latent 位置，包括自己）
+                n = A_idx.numel()
+                ar = torch.arange(n, device=A_idx.device)
+                # 下三角(含对角) : row i 看到 col j 当且仅当 j <= i
+                tri = ar.unsqueeze(1) >= ar.unsqueeze(0)          # (n, n) bool
+
+                # 将局部 (n×n) 三角可见图写回全局 [L×L]
+                rows = A_idx.unsqueeze(1).expand(n, n)            # (n, n)
+                cols = A_idx.unsqueeze(0).expand(n, n)            # (n, n)
+                allowed[b][rows, cols] = tri
 
                 # 2) Only A_i can see I_i (mask I_i keys for all non-A queries)
                 if I_idx.numel():
@@ -933,8 +946,9 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
                 allowed[b][I_idx, :] = False
                 allowed[b][I_idx, I_idx] = True
 
+    return allowed.unsqueeze(1)
     # Convert to additive bias: 0 for allowed, large_neg for masked
-    attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)
-    mask_4d = (~allowed).unsqueeze(1)           # [B, 1, L, L]
-    attn_bias = attn_bias.masked_fill(mask_4d, large_neg)
-    return (attn_bias >= 0) #attn_bias
+    #attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)
+    #mask_4d = (~allowed).unsqueeze(1)           # [B, 1, L, L]
+    #attn_bias = attn_bias.masked_fill(mask_4d, large_neg)
+    #return (attn_bias >= 0) #attn_bias

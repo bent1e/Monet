@@ -466,7 +466,13 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         Compute training loss and additionally compute token accuracies
         """
         inputs['latent_mode'] = True
+        inputs['loss_type'] = []
+        outputs = model(**inputs, return_dict=True, output_hidden_states=True)
 
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        inputs['latent_mode'] = False
+        inputs['ce_patch_pos'] = outputs.ce_patch_pos
+        inputs['ce_patch_vec'] = outputs.ce_patch_vec
         inputs['ce_emphasize_poss'] = inputs['observation_poss']
         # Dynamic warmup factor passed to model.forward
         inputs['ce_emphasize_factor'] = self._current_ce_emphasize_factor()

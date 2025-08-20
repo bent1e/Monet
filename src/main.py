@@ -160,7 +160,7 @@ SPECIAL_id = {
 model.config.latent_token_id = int(latent_pad_idx)
 model.config.latent_start_id = int(latent_start_idx)
 model.config.latent_end_id = int(latent_end_idx)
-model.config.answer_start_pattern = answer_start_pattern
+model.config.answer_start_pattern = answer_start_pattern.tolist()
 
 for param in model.visual.parameters():
     param.requires_grad = False
@@ -383,7 +383,7 @@ def collate_fn_avt_v2_stage1(examples, alignment="boxed_start"):
         pad_mask=batch["attention_mask"],
         token_ids=SPECIAL_id,
         large_neg=-1e5,
-    ).to(next(model.parameters()).dtype) }
+    ) }
     
     observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
     observation_end_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_end_idx)
