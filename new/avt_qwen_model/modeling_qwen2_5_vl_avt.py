@@ -1317,12 +1317,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         device = inputs_embeds.device
         dtype  = inputs_embeds.dtype
 
-
-        if self.training:
-            ce_patch_pos = [[] for _ in range(batch_size)]   # List[List[int]]
-            ce_patch_vec = [[] for _ in range(batch_size)]   # List[List[Tensor(H,)]]
-
-        
+        ce_patch_pos = [[] for _ in range(batch_size)]   # List[List[int]]
+        ce_patch_vec = [[] for _ in range(batch_size)]   # List[List[Tensor(H,)]]
 
         if latent_mode:
             total_align_loss = None
@@ -1458,10 +1454,13 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 last_latent_pos_before_alignment = [] # same len as align_pos
                 ans_start = _first_pattern_end(input_ids[b], self.config.answer_start_pattern)
                 
-                for ap in align_pos:
+                '''for ap in align_pos:
                     # find the last latent position before this alignment position
                     last_latent_pos = max([lp for lp in latent_pos if lp < ap], default=None)
-                    last_latent_pos_before_alignment.append(last_latent_pos)
+                    last_latent_pos_before_alignment.append(last_latent_pos)'''
+                
+                if torch.is_tensor(teacher_hidden_states_for_alignment):
+                    assert teacher_hidden_states_for_alignment.shape[1] == len(align_pos), f"teacher_hidden_states_for_alignment.shape[1] ({teacher_hidden_states_for_alignment.shape[1]}) != len(align_pos) ({len(align_pos)})"
 
                 seq_embeds   = inputs_embeds[b : b + 1]         # (1,L,H)
                 pos_ids_s    = position_ids[:, b : b + 1]       # (3,1,L)
@@ -1625,7 +1624,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
 
                     step_out = self.language_model(
                         input_ids=None,
-                        inputs_embeds=latent_embed.detach() if stage == 'avt_v1_stage1' else latent_embed,
+                        inputs_embeds=latent_embed.detach(),# if stage == 'avt_v1_stage1' else latent_embed,
                         position_ids=step_pos_ids,
                         attention_mask=step_attn_mask,
                         past_key_values=past_kv,
@@ -1649,7 +1648,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                     prev_idx = pos + 1
 
                 past_key_values_batch[b] = past_kv
-                if teacher_hidden_states_for_alignment:
+                if teacher_hidden_states_for_alignment is not None:
                     if len(align_losses_this_b) > 0:
                         # normalize inside-tasks however you want
                         align_loss_b = torch.cat(align_losses_this_b).sum() / max(1, len(align_pos))
@@ -1691,7 +1690,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         # ---------- END latent_mode implementation ----------
 
 
-        else:
+        else: # latent_mode == False
             if ce_patch_pos is not None and ce_patch_vec is not None: # latent-ce_loss forward
                 # 确保 dtype/device 一致；注意 ce_patch_vec 已经 detach
                 for b in range(len(ce_patch_pos)):

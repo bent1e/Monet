@@ -7,3 +7,14 @@ pylatexenc
 Pillow
 vllm>0.7.2
 torchvision
+
+# easyr1
+omegaconf
+tensordict
+torchdata
+tensorboard
+codetiming
+pebble
+timeout_decorator
+word2number
+sentence_transformers

@@ -276,6 +276,8 @@ class CustomTrainerSFT(SFTTrainer):
                     "loss_teacher_ce"
                 ])
 
+        
+
     def _current_ce_emphasize_factor(self) -> float:
         """Linear warmup from 1.0 -> target over N steps or ratio of total steps.
 
@@ -323,6 +325,8 @@ class CustomTrainerSFT(SFTTrainer):
                 inputs,
                 return_outputs=True, num_items_in_batch=num_items_in_batch
             )
+
+        
 
         # Representation analysis update
         if self.rep_analyzer is not None and 'sample_id' in inputs:
@@ -516,6 +520,12 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         super().__init__(*args, **kwargs)
         self.weight = self.args.alignment_weight
         self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
+        # Where to read precomputed teacher latents
+        base_save = getattr(self.args, 'output_dir', './checkpoints')
+        self.teacher_latent_dir = getattr(self.args, 'teacher_latent_dir', None)
+        if not self.teacher_latent_dir:
+            # fall back to user-specified save_model_path-like; use output_dir parent by default
+            self.teacher_latent_dir = os.path.join(base_save if base_save else './checkpoints', 'teacher_latents')
         # 仅 rank‑0 进程写文件，防止多卡重复
         self.is_main_process = (
             not torch.distributed.is_initialized()
@@ -539,6 +549,18 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
                     "loss_align"
                 ])
         
+        # ---- token-level error logging config ----
+        # Only rank-0 writes jsonl to avoid duplication
+        self.token_error_log_interval: int = int(getattr(self.args, 'token_error_log_interval', 1) or 1)
+        self.token_error_max_records: int = int(getattr(self.args, 'token_error_max_records', 10) or 10)
+        self._token_error_written: int = 0
+        token_err_dir = os.path.join(log_dir, 'token_errors')
+        os.makedirs(token_err_dir, exist_ok=True)
+        self.token_error_path = os.path.join(
+            token_err_dir,
+            f"token_errors_{self.exp_name}_{timestamp}.jsonl",
+        )
+
         self._al_loss_cum = 0.0       # cumulative alignment loss since last log
         self._al_steps = 0            # number of micro-steps accumulated
         self._stu_ce_cum = 0.0        # cumulative student CE loss
@@ -546,8 +568,9 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
                 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
-        Compute training loss and additionally compute token accuracies
+        Compute training loss for AVT v2 stage2 with optional cached teacher latents.
         """
+        # Prepare teacher forward inputs (for latent extraction)
         inputs['stage'] = 'avt_v2_stage2'
         inputs['latent_mode'] = True
         inputs['input_ids'] = inputs['teacher_input_ids']
@@ -556,28 +579,61 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         inputs['image_grid_thw'] = inputs['teacher_image_grid_thw']
         inputs['labels'] = None
         inputs['alignment_poss'] = inputs['teacher_alignment_poss']
-        #model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         model.gradient_checkpointing_disable()
         inputs['loss_type'] = []
         inputs['output_latent_embeds'] = True
-        with torch.no_grad():
-            teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
-            
+
+        # Try to load precomputed teacher latents
+        teacher_outputs = None
+        use_cached = False
+        batch_metadata = inputs.get('metadata', None)
+        if batch_metadata is not None and self.teacher_latent_dir and os.path.isdir(self.teacher_latent_dir):
+            try:
+                latents_list = []
+                for metadata in batch_metadata:
+                    dataset_name = metadata['dataset_name']
+                    sample_id = metadata['sample_id']
+                    metadata_info = f"{dataset_name}_{sample_id}"
+                    path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
+                    if not os.path.isfile(path):
+                        latents_list = []
+                        break
+                    data = torch.load(path, map_location='cpu')
+                    latents_list.append(data['latent'])
+                if batch_metadata is not None and len(latents_list) == len(batch_metadata):
+                    latents = torch.stack([t if t.dim() == 2 else t.squeeze(0) for t in latents_list], dim=0).to(model.device)
+                    class _Obj:
+                        pass
+                    teacher_outputs = _Obj()
+                    teacher_outputs.latent_embeds = latents
+                    use_cached = True
+            except Exception:
+                use_cached = False
+                teacher_outputs = None
+
+        # Fallback to online teacher forward
+        if not use_cached:
+            with torch.no_grad():
+                teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
+
+        # Student alignment forward
         inputs['latent_mode'] = True
         inputs['input_ids'] = inputs['student_input_ids']
         inputs['attention_mask'] = inputs['student_attention_mask']
         inputs['pixel_values'] = inputs['student_pixel_values']
         inputs['image_grid_thw'] = inputs['student_image_grid_thw']
-        inputs.pop('labels')
+        if 'labels' in inputs:
+            inputs.pop('labels')
         inputs['alignment_poss'] = inputs['student_alignment_poss']
         inputs['teacher_hidden_states_for_alignment'] = teacher_outputs.latent_embeds
         model.gradient_checkpointing_disable()
         inputs['loss_type'] = ['alignment']
         inputs['output_latent_embeds'] = False
-        (alignment_loss, student_outputs) = super().compute_loss(   
-                model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
-            )
- 
+        (alignment_loss, student_outputs) = super().compute_loss(
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        )
+
+        # Student CE forward
         inputs['latent_mode'] = False
         inputs['labels'] = inputs['student_labels']
         inputs['ce_patch_pos'] = student_outputs.ce_patch_pos
@@ -586,53 +642,104 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         inputs['loss_type'] = ['ce']
         (student_ce_loss, student_outputs) = super().compute_loss(
-                model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
-        alignment_loss = alignment_loss.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
 
-        # If self.weight might be a tensor on CPU or a list, normalize it
+        # ------- token-level error dump (rank-0, sampled by interval) -------
+        try:
+            if self.is_main_process and (self.state.global_step % max(1, self.token_error_log_interval) == 0) and self._token_error_written < self.token_error_max_records:
+                logits = getattr(teacher_outputs, 'logits', None)
+                labels = inputs.get('labels', None)
+                input_ids = inputs.get('input_ids', None)
+                if logits is not None and labels is not None and input_ids is not None:
+                    with torch.no_grad():
+                        # Align with CE: compare logits[:, :-1] vs labels[:, 1:]
+                        preds = torch.argmax(logits, dim=-1)
+                        preds_shift = preds[:, :-1]
+                        labels_shift = labels[:, 1:]
+                        mask = labels_shift.ne(-100)
+                        # Take the first sample in batch for logging to keep file small
+                        b = 0
+                        if preds_shift.size(0) > 0:
+                            ps = preds_shift[b].detach().cpu().tolist()
+                            ls = labels_shift[b].detach().cpu().tolist()
+                            ms = mask[b].detach().cpu().tolist()
+                            inp = input_ids[b].detach().cpu().tolist()
+                            # Keep token strings for visualization (safe access)
+                            tok = None
+                            try:
+                                proc = getattr(self, 'processing_class', None)
+                                if proc is None:
+                                    proc = getattr(self, 'tokenizer', None)
+                                if proc is not None:
+                                    tokenizer = getattr(proc, 'tokenizer', proc)
+                                    tok = tokenizer.convert_ids_to_tokens(inp)
+                            except Exception:
+                                tok = None
+                            # Build record at full sequence length (unshifted indices)
+                            # We store also the aligned region indices for convenience
+                            record = {
+                                'global_step': int(self.state.global_step),
+                                'epoch': float(self.state.epoch) if self.state.epoch is not None else None,
+                                'sample_index': 0,
+                                'input_ids': inp,
+                                'token_strs': tok,
+                                'pred_ids_shift': ps,
+                                'label_ids_shift': ls,
+                                'mask_shift': ms,
+                                'aligned_offset': 1,  # labels/logits alignment offset
+                                'exp_name': self.exp_name,
+                            }
+                            # Optional: attach sample_id if provided by collator
+                            if 'sample_id' in inputs:
+                                try:
+                                    record['sample_id'] = int(inputs['sample_id'][b])
+                                except Exception:
+                                    pass
+                            # Write JSONL append
+                            import json
+                            with open(self.token_error_path, 'a', encoding='utf-8') as f:
+                                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            self._token_error_written += 1
+        except Exception as _log_e:
+            # Don't break training on logging errors
+            pass
+
+        alignment_loss = alignment_loss.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
         if isinstance(self.weight, torch.Tensor):
             self.weight = self.weight.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
         else:
-            # cast python float to the same dtype for safety
             self.weight = student_ce_loss.new_tensor(float(self.weight))
-        loss = student_ce_loss + self.weight *alignment_loss
+        loss = student_ce_loss + self.weight * alignment_loss
 
         outputs_student_loss = student_ce_loss.item()
 
-        # Avoid per-step cache clearing which forces device sync and hurts utilization.
-        # Just release references; optionally run a light GC periodically.
+        # Periodic light GC on main process
         del student_outputs, teacher_outputs
         step = int(getattr(self.state, 'global_step', 0) or 0)
         if self.is_main_process and step > 0 and (step % 20 == 0):
             try:
                 gc.collect()
                 torch.cuda.empty_cache()
-                # DO NOT call torch.cuda.empty_cache() every step; it stalls the GPU.
             except Exception:
                 pass
-        
-        # -------- wandb logging --------
-        al_val = float(alignment_loss.detach().item()) if torch.is_tensor(alignment_loss) else float(alignment_loss)
-        self._al_loss_cum += al_val
+
+        # Logging
+        self._al_loss_cum += float(alignment_loss.detach().item())
         self._al_steps += 1
-        self._stu_ce_cum += float(student_ce_loss.detach().item())
+        self._stu_ce_cum += outputs_student_loss
         self._stu_ce_steps += 1
 
-        # --------  local logging  --------
         if self.is_main_process:
             with open(self.loss_log_path, "a", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     self.state.global_step,
                     self.state.epoch,
-                    loss.item(),
+                    float(loss.detach().item()),
                     outputs_student_loss,
-                    alignment_loss.item() if isinstance(alignment_loss, torch.Tensor) else alignment_loss,
+                    float(alignment_loss.detach().item()),
                 ])
-        # --------------------------------------------
-        
-        
         return (loss, None) if return_outputs else loss
     
     def log(self, logs: dict, start_time: float | None = None):

@@ -104,7 +104,7 @@ try:
     gc_kwargs = {"use_reentrant": False}
 
     # Only enable GC for stages that need it; keep it OFF for avt_v2_stage1/2
-    if args.stage in ["avt_sft", "avt_stage1"]:
+    if args.stage in ["avt_sft"]:
         enabled = False
         # Qwen2.5-VL commonly exposes the backbone under one of these attributes
         for attr in ["language_model", "transformer", "model"]:
@@ -382,6 +382,7 @@ def collate_fn_avt_v2_stage1(examples):
         pad_mask=batch["attention_mask"],
         token_ids=SPECIAL_id,
         large_neg=-1e5,
+        mask_latent=getattr(args, 'mask_latent', False),
     ) }
     
     observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
@@ -402,12 +403,16 @@ def collate_fn_avt_v2_stage1(examples):
 
 
 def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
-    batch_assistant_img_cnts = [sum(1 for step in example[2]['content'] if step["type"] == "image") for example in examples]
-    texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
+    # Support wrapped examples providing sample_id
+    batch = {}
+    batch['metadata'] = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+    batch_assistant_img_cnts = [sum(1 for step in examples[i][2]['content'] if step["type"] == "image") for i in range(len(examples))]
+    texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
     texts = [place_output_image_avt(text) for text in texts]
-    batch = {}
+    
     ################################################
     # teacher
     ################################################
@@ -465,7 +470,6 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
     batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx])
 
-
     return batch
 
 
@@ -485,7 +489,7 @@ train_dataset = []
 cur_max = -1
 for i, sample in tqdm(enumerate(all_train_dataset[:]), desc="Collecting training data and length check...", total=len(all_train_dataset)):
     if 'avt' in args.stage:
-        processed, cur_max = preprocess_function(sample, dataset_root=args.dataset_root, processor=processor, max_seq_len=3000, cur_max=cur_max, id=i, rank=_rank)
+        processed = preprocess_function(sample, dataset_root=args.dataset_root)
     else:
         processed = preprocess_function(sample)
     if processed is not None:
@@ -493,19 +497,6 @@ for i, sample in tqdm(enumerate(all_train_dataset[:]), desc="Collecting training
 
 #train_dataset = [d for d in [preprocess_function(sample) for sample in all_train_dataset[:]] if d is not None]
 
-# ---- Conversation wrapper for avt_sft stage (adds sample_id) ----
-if args.stage == 'avt_sft':
-    from torch.utils.data import Dataset as _TorchDataset
-    class ConversationDataset(_TorchDataset):
-        def __init__(self, conversations):
-            self.conversations = conversations
-        def __len__(self):
-            return len(self.conversations)
-        def __getitem__(self, idx):
-            return { 'conversation': self.conversations[idx], 'sample_id': idx }
-    wrapped_dataset = ConversationDataset(train_dataset)
-else:
-    wrapped_dataset = None
 
 dataset_names = ""
 for data_path in args.data_path:
@@ -513,7 +504,7 @@ for data_path in args.data_path:
     dataset_names += f"-{dataset_name}"
 
 # Automatically construct save name with the hyperparameters
-exp_name = f"{args.stage}-ep{args.epochs}-bsz{args.bsz}-lr{1e-5}"
+exp_name = f"{args.stage}-ep{args.epochs}-bsz{args.bsz}-lr{args.lr}"
 
 if args.stage == 'avt_stage1':
     exp_name += f"-{args.min_latent_size}-{args.min_latent_compress_factor}-{args.max_latent_compress_factor}-wt{args.alignment_weight}-ce_emphasize_{args.ce_emphasize_factor}"
@@ -567,7 +558,7 @@ training_args = SFTConfig(
     per_device_train_batch_size=args.bsz,
     gradient_accumulation_steps=args.grad_accum_steps,
     warmup_steps=10,
-    learning_rate=1e-5,
+    learning_rate=args.lr,
     weight_decay=0.01,
     logging_steps=1,
     save_strategy="steps",
@@ -615,13 +606,17 @@ elif args.stage == 'avt_v2_stage2':
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
     setattr(training_args, 'alignment_weight', args.alignment_weight)
     setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})
+    # Propagate teacher_latent_dir so trainer can load cached latents
+    import os as _os
+    _tld = args.teacher_latent_dir if getattr(args, 'teacher_latent_dir', None) else _os.path.join(save_dir, 'teacher_latents')
+    setattr(training_args, 'teacher_latent_dir', _tld)
 
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(
     model=model,
     args=training_args,
-    train_dataset=wrapped_dataset if args.stage=='avt_sft' else train_dataset,
+    train_dataset=train_dataset,
     data_collator=collate_fn,
     processing_class=processor,
     exp_name=exp_name,
@@ -659,7 +654,7 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
                     os.remove(ready_marker)
             except Exception:
                 pass
-            total_size = len(wrapped_dataset)
+            total_size = len(train_dataset)
             subset_ids = analyzer.select_subset(
                 total_size, args.sft_analysis_ratio, args.sft_analysis_max_samples, args.sft_analysis_seed
             )
@@ -742,7 +737,7 @@ if args.stage == 'avt_sft' and getattr(args, 'sft_analysis_enable', False):
             bs = min(2, args.bsz)
             for i in tqdm(range(0, len(shard_ids), bs)):
                 cur_ids = shard_ids[i:i+bs]
-                examples = [{'conversation': wrapped_dataset[j]['conversation'], 'sample_id': j} for j in cur_ids]
+                examples = [{'conversation': train_dataset[j]['conversation'], 'sample_id': j} for j in cur_ids]
                 batch_b = collate_fn(examples)
                 inputs_model = {
                     'input_ids': batch_b['teacher_input_ids'].to(device),

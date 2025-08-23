@@ -16,7 +16,7 @@ def get_args():
     # ===== Basic arguments =====
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/model_stage1')
     parser.add_argument("--data_path", type=str, default='PathToJsonlData', nargs='+')
-    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1', 'avt_v2_stage1', 'avt_v2_stage2'])
+    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1', 'avt_v2_stage1', 'avt_v2_precompute_latent', 'avt_v2_stage2'])
     parser.add_argument("--task", type=str, default="vsp-spatial-reasoning", choices=["vsp-spatial-reasoning", "vsp-spatial-planning", "blink-jigsaw", "sat", "mm-reasoning"])
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/',help="Path to save the model checkpoints.")
     parser.add_argument("--resume_from_checkpoint", default=False, action="store_true")
@@ -25,6 +25,7 @@ def get_args():
                         help="Path to DeepSpeed config JSON, e.g., ./deepspeed/ds_zero2_cpu_offload.json")
     
     # ===== Basic training hyperparameters =====
+    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for training.")
     parser.add_argument("--bsz", type=int, default=1, help="Batch size for training.")
     parser.add_argument("--grad_accum_steps", type=int, default=4, help="Gradient accumulation steps.")
     parser.add_argument("--epochs", type=int, default=10)  
@@ -59,6 +60,12 @@ def get_args():
                         help="Directory to save analysis artifacts (subset ids, per-epoch cosine stats).")
     parser.add_argument("--sft_analysis_categories", type=str, nargs='+', default=["boxed_start_poss","observation_poss"],
                         help="Token position categories to aggregate: boxed_start_poss, observation_poss, non_observation_poss.")
+    # ===== Masking behavior =====
+    parser.add_argument("--mask_latent", action='store_true', default=False,
+                        help="If set, make latent tokens (A_i) invisible to all subsequent tokens in build_additive_bias.")
+    # ===== Precomputed teacher latent loading =====
+    parser.add_argument("--teacher_latent_dir", type=str, default=None,
+                        help="Directory that stores precomputed teacher latents (files named latent_{sample_id:08d}.pt). If not set, defaults to {save_model_path or ./checkpoints}/teacher_latents.")
     # DeepSpeed config path (optional). If provided, Trainer will enable DeepSpeed with this config.
 
     return parser.parse_args()
@@ -869,7 +876,7 @@ def find_segments_1d(ids, token_ids):
     return S
 
 
-def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
+def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False):
     """
     input_ids: LongTensor [B, L]
     pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
@@ -929,7 +936,7 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
 
                 # 2) Only A_i can see I_i (mask I_i keys for all non-A queries)
                 if I_idx.numel():
-            # Build row index set of "not in A_i"
+                    # Build row index set of "not in A_i"
                     not_A = torch.ones(Lb, dtype=torch.bool, device=device)
                     not_A[A_idx] = False
                     not_A_idx = torch.nonzero(not_A, as_tuple=False).squeeze(-1)  # [R]
@@ -937,10 +944,20 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5):
                         # Block (rows in not_A_idx, cols in I_idx)
                         allowed[b][not_A_idx[:, None], I_idx] = False
 
+                # Optional: make A_i invisible to all subsequent tokens (as keys)
+                if mask_latent:
+                    # rows r are considered "subsequent" if any a in A_idx satisfies a < r
+                    r_idx = torch.arange(Lb, device=device)
+                    rows_to_block = (r_idx.unsqueeze(0) > A_idx.unsqueeze(1)).any(dim=0)  # [L]
+                    if rows_to_block.any():
+                        allowed[b][rows_to_block.nonzero(as_tuple=False).squeeze(-1)[:, None], A_idx] = False
+
             if O_idx.numel() and A_idx.numel():
                 # 3) O_i only sees A_i
                 allowed[b][O_idx, :] = False
-                allowed[b][O_idx.unsqueeze(1), A_idx] = True
+                # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
+                if not mask_latent:
+                    allowed[b][O_idx.unsqueeze(1), A_idx] = True
 
             if I_idx.numel():
                 # Optional safety: restrict I_i queries to themselves only (identity)
