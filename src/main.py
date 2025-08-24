@@ -169,6 +169,7 @@ for param in model.visual.parameters():
 
 
 def collate_fn_avt_stage1(examples, alignment="boxed_start"):
+    examples = examples['data']
     batch_assistant_img_cnts = [sum(1 for step in example[2]['content'] if step["type"] == "image") for example in examples]
     texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
 
@@ -360,7 +361,11 @@ def collate_fn_avt_sft(examples):
     return batch
 
 def collate_fn_avt_v2_stage1(examples):
-    texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
+    batch = {}
+    batch['metadata'] = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+    batch_assistant_img_cnts = [sum(1 for step in examples[i][2]['content'] if step["type"] == "image") for i in range(len(examples))]
+    texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace `<abs_vis_token></abs_vis_token>`` with `<|vision_start|><|image_pad|><|vision_end|>`` for each `<|im_start|>assistant`` content
     texts = [place_output_image_avt(text) for text in texts]
@@ -384,6 +389,7 @@ def collate_fn_avt_v2_stage1(examples):
         large_neg=-1e5,
         mask_latent=getattr(args, 'mask_latent', False),
     ) }
+
     
     observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
     observation_end_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_end_idx)
@@ -397,7 +403,7 @@ def collate_fn_avt_v2_stage1(examples):
                 poss_of_a_sample.extend(list(range(start, end + 1)))
         batch["observation_poss"].append(poss_of_a_sample)
 
-    batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, img_pad_idx])
+    batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, img_pad_idx,  img_start_idx, img_end_idx])
 
     return batch
 

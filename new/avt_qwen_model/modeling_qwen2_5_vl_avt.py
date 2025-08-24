@@ -1317,10 +1317,9 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         device = inputs_embeds.device
         dtype  = inputs_embeds.dtype
 
-        ce_patch_pos = [[] for _ in range(batch_size)]   # List[List[int]]
-        ce_patch_vec = [[] for _ in range(batch_size)]   # List[List[Tensor(H,)]]
-
         if latent_mode:
+            ce_patch_pos = [[] for _ in range(batch_size)]   # List[List[int]]
+            ce_patch_vec = [[] for _ in range(batch_size)]   # List[List[Tensor(H,)]]
             total_align_loss = None
 
             def alignment_loss(teacher_hidden_states_all: Union[List[List[torch.Tensor]], torch.Tensor], student_hidden_states_all: Union[List[torch.Tensor], torch.Tensor], batch_id: int=-1, poss: int=-1):
@@ -1705,7 +1704,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             outputs = self.language_model(
                 input_ids=None,
                 position_ids=position_ids,
-                attention_mask=attention_mask,
+                attention_mask=attention_mask_4d if attention_mask_4d is not None else attention_mask,
                 past_key_values=past_key_values,
                 inputs_embeds=inputs_embeds,
                 use_cache=use_cache,

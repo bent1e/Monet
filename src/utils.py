@@ -970,3 +970,137 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_lat
     #mask_4d = (~allowed).unsqueeze(1)           # [B, 1, L, L]
     #attn_bias = attn_bias.masked_fill(mask_4d, large_neg)
     #return (attn_bias >= 0) #attn_bias
+
+def find_segments_1d_wo_helper_images(ids, token_ids):
+    """
+    ids: 1D LongTensor, shape [L]
+    token_ids: dict with keys:
+        'v_start', 'v_end', 'img_pad',
+        'abs_start', 'abs_end', 'abs_pad',
+        'obs_start', 'obs_end'
+    Returns: list of tuples for each S_i:
+        (I_idx: LongTensor, A_idx: LongTensor, O_idx: LongTensor)
+        O_idx may be empty if no <observation>...</observation> in T_i
+    """
+    L = ids.numel()
+    I_segments, A_segments, O_segments = [], [], []
+
+    # Helper to collect indices between two tags (exclusive) that match 'wanted_id' (or all if None)
+    def between(start_pos, end_pos, wanted_id=None):
+        s = start_pos + 1
+        e = end_pos
+        if s >= e: 
+            return torch.empty(0, dtype=torch.long, device=ids.device)
+        if wanted_id is None:
+            idx = torch.arange(s, e, device=ids.device)
+        else:
+            mask = (ids[s:e] == wanted_id)
+            idx = torch.nonzero(mask, as_tuple=False).squeeze(-1) + s
+        return idx
+
+
+    # 2) Parse all A_i by pairing <abs_vis_token> ... </abs_vis_token>
+    a_starts = torch.nonzero(ids == token_ids['abs_start'], as_tuple=False).squeeze(-1)
+    a_ends   = torch.nonzero(ids == token_ids['abs_end'],   as_tuple=False).squeeze(-1)
+    As, Ae = [], []
+    a_ptr, b_ptr = 0, 0
+    while a_ptr < a_starts.numel() and b_ptr < a_ends.numel():
+        if a_starts[a_ptr] < a_ends[b_ptr]:
+            As.append(a_starts[a_ptr].item()); Ae.append(a_ends[b_ptr].item())
+            a_ptr += 1; b_ptr += 1
+        else:
+            b_ptr += 1
+
+    # 3) For each (I_i, A_i) in order, find O_i within T_i
+    S = []
+    for i in range(len(As)):
+        as_, ae = As[i], Ae[i]
+
+        A_idx = between(as_, ae, wanted_id=token_ids['abs_pad'])
+
+        # T_i is from ae to next latent start (or end of sequence)
+        t_end = As[i+1] if i + 1 < len(As) else L
+        # Find all <observation>...</observation> fully inside T_i
+        obs_starts = torch.nonzero((ids == token_ids['obs_start']) & (torch.arange(L, device=ids.device) >= ae) & (torch.arange(L, device=ids.device) < t_end), as_tuple=False).squeeze(-1)
+        obs_ends   = torch.nonzero((ids == token_ids['obs_end'])   & (torch.arange(L, device=ids.device) >  ae) & (torch.arange(L, device=ids.device) <= t_end), as_tuple=False).squeeze(-1)
+
+        # Pair obs tags in order
+        O_all = []
+        p, q = 0, 0
+        while p < obs_starts.numel() and q < obs_ends.numel():
+            if obs_starts[p] < obs_ends[q]:
+                # tokens between the two tags (exclusive) belong to O_i
+                O_idx = between(obs_starts[p].item(), obs_ends[q].item(), wanted_id=None)
+                if O_idx.numel():
+                    O_all.append(O_idx)
+                p += 1; q += 1
+            else:
+                q += 1
+
+        O_idx = torch.cat(O_all, dim=0) if len(O_all) else torch.empty(0, dtype=torch.long, device=ids.device)
+        S.append((A_idx, O_idx))
+
+    return S
+
+def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False):
+    """
+    input_ids: LongTensor [B, L]
+    pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
+    token_ids: dict of special token ids (see above)
+    large_neg: float used as "negative infinity" added to logits
+
+    Returns:
+      attn_bias: FloatTensor [B, 1, L, L] with 0 for allowed and large_neg for blocked
+                 This bias ALREADY includes causal mask and padding mask.
+    """
+    input_ids = input_ids.cpu()
+    pad_mask = pad_mask.cpu()
+    
+    B, L = input_ids.shape
+    device = input_ids.device
+    dtype_bias = torch.float32  # keep in fp32 for numerical safety; model will cast internally
+
+    # Base: causal visibility (lower-triangular including diagonal)
+    causal = torch.tril(torch.ones((L, L), dtype=torch.bool, device=device))
+
+    # Start from causal AND valid tokens (both query & key must be valid)
+    valid = pad_mask.bool()
+    allowed = causal.unsqueeze(0).clone()  # [1, L, L]
+    allowed = allowed.repeat(B, 1, 1)      # [B, L, L]
+    for b in range(B):
+        allowed[b] &= valid[b].unsqueeze(0)  # mask keys
+        allowed[b] &= valid[b].unsqueeze(1)  # mask queries
+
+    # Apply per-segment constraints
+    for b in range(B):
+        segs = find_segments_1d_wo_helper_images(input_ids[b], token_ids)
+        if not segs:
+            continue
+
+        Lb = input_ids.shape[1]
+        all_idx = torch.arange(Lb, device=device)
+
+        for (A_idx, O_idx) in segs:
+            if A_idx.numel():
+                # Optional: make A_i invisible to all subsequent tokens (as keys)
+                if mask_latent:
+                    # rows r are considered "subsequent" if any a in A_idx satisfies a < r
+                    r_idx = torch.arange(Lb, device=device)
+                    rows_to_block = (r_idx.unsqueeze(0) >= A_idx.unsqueeze(1)).any(dim=0)  # [L]
+                    if rows_to_block.any():
+                        allowed[b][rows_to_block.nonzero(as_tuple=False).squeeze(-1)[:, None], A_idx] = False
+
+            if O_idx.numel() and A_idx.numel():
+                # 3) O_i only sees A_i
+                allowed[b][O_idx, :] = False
+                # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
+                if not mask_latent:
+                    allowed[b][O_idx.unsqueeze(1), A_idx] = True
+
+    return allowed.unsqueeze(1)
+    # Convert to additive bias: 0 for allowed, large_neg for masked
+    #attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)
+    #mask_4d = (~allowed).unsqueeze(1)           # [B, 1, L, L]
+    #attn_bias = attn_bias.masked_fill(mask_4d, large_neg)
+    #return (attn_bias >= 0) #attn_bias
+

@@ -8,8 +8,8 @@ LR=0.000001
 LATENT_SIZE=6
 CE_EMPHASIZE_FACTOR=1.0
 ALIGNMENT_WEIGHT=1.0
-LOAD_CKPT=08_20-avt_v2_stage1-latent${LATENT_SIZE}-ce_factor${CE_EMPHASIZE_FACTOR}
-SAVE_CKPT=08_22-avt_v2_stage2-lr${LR}-latent${LATENT_SIZE}-ce_factor${CE_EMPHASIZE_FACTOR}-align_wt${ALIGNMENT_WEIGHT}
+LOAD_CKPT=08_24-avt_v2_stage1-latent${LATENT_SIZE}-ce_factor${CE_EMPHASIZE_FACTOR}
+SAVE_CKPT=08_2X-avt_v2_stage2-lr${LR}-latent${LATENT_SIZE}-ce_factor${CE_EMPHASIZE_FACTOR}-align_wt${ALIGNMENT_WEIGHT}
 
 source /pfs/wangzihao11/miniconda3/bin/activate
 conda activate mirage
@@ -21,15 +21,15 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --grad_accum_steps 16 \
   --task "mm-reasoning" \
   --stage "avt_v2_stage2" \
-  --data_path "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/CoF/filtered_train_new.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/CoM_w_MathVista/filtered_train_new.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/PixelReasoner/filtered_train_new.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/ReFocus/filtered_train_new.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_count/filtered_train_new.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_visual_search/filtered_train_new.json" \
+  --data_path "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/CoF/filtered_train_new_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/CoM_w_MathVista/filtered_train_new_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/PixelReasoner/filtered_train_new_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/ReFocus/filtered_train_new_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_count/filtered_train_new_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_visual_search/filtered_train_new_w_metadata.json" \
     "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_geometry" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_maze/filtered_train_short3000.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/VTS_1/filtered_train_short3000.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_maze/filtered_train_short3000_w_metadata.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/VTS_1/filtered_train_short3000_w_metadata.json" \
   --log_file "./log.txt" \
   --load_model_path /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_v2_stage1/${LOAD_CKPT} \
   --save_model_path /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_v2_stage2/${SAVE_CKPT} \

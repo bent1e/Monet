@@ -60,7 +60,7 @@ class CustomTrainerAVTStage1(SFTTrainer):
         log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-        self.loss_log_path = os.path.join(log_dir, f"loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
+        self.loss_log_path = os.path.join(log_dir, f"loss_history/loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
 
         # 如果文件不存在，就写表头
         if self.is_main_process and not os.path.exists(self.loss_log_path):
@@ -265,7 +265,7 @@ class CustomTrainerSFT(SFTTrainer):
         log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-        self.loss_log_path = os.path.join(log_dir, f"loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
+        self.loss_log_path = os.path.join(log_dir, f"loss_history/loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
 
         # 如果文件不存在，就写表头
         if self.is_main_process and not os.path.exists(self.loss_log_path):
@@ -432,7 +432,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-        self.loss_log_path = os.path.join(log_dir, f"loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
+        self.loss_log_path = os.path.join(log_dir, f"loss_history/loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
 
         # 如果文件不存在，就写表头
         if self.is_main_process and not os.path.exists(self.loss_log_path):
@@ -536,7 +536,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-        self.loss_log_path = os.path.join(log_dir, f"loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
+        self.loss_log_path = os.path.join(log_dir, f"loss_history/loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
 
         # 如果文件不存在，就写表头
         if self.is_main_process and not os.path.exists(self.loss_log_path):
@@ -548,18 +548,6 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
                     "loss_student_ce",
                     "loss_align"
                 ])
-        
-        # ---- token-level error logging config ----
-        # Only rank-0 writes jsonl to avoid duplication
-        self.token_error_log_interval: int = int(getattr(self.args, 'token_error_log_interval', 1) or 1)
-        self.token_error_max_records: int = int(getattr(self.args, 'token_error_max_records', 10) or 10)
-        self._token_error_written: int = 0
-        token_err_dir = os.path.join(log_dir, 'token_errors')
-        os.makedirs(token_err_dir, exist_ok=True)
-        self.token_error_path = os.path.join(
-            token_err_dir,
-            f"token_errors_{self.exp_name}_{timestamp}.jsonl",
-        )
 
         self._al_loss_cum = 0.0       # cumulative alignment loss since last log
         self._al_steps = 0            # number of micro-steps accumulated
@@ -645,66 +633,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
 
-        # ------- token-level error dump (rank-0, sampled by interval) -------
-        try:
-            if self.is_main_process and (self.state.global_step % max(1, self.token_error_log_interval) == 0) and self._token_error_written < self.token_error_max_records:
-                logits = getattr(teacher_outputs, 'logits', None)
-                labels = inputs.get('labels', None)
-                input_ids = inputs.get('input_ids', None)
-                if logits is not None and labels is not None and input_ids is not None:
-                    with torch.no_grad():
-                        # Align with CE: compare logits[:, :-1] vs labels[:, 1:]
-                        preds = torch.argmax(logits, dim=-1)
-                        preds_shift = preds[:, :-1]
-                        labels_shift = labels[:, 1:]
-                        mask = labels_shift.ne(-100)
-                        # Take the first sample in batch for logging to keep file small
-                        b = 0
-                        if preds_shift.size(0) > 0:
-                            ps = preds_shift[b].detach().cpu().tolist()
-                            ls = labels_shift[b].detach().cpu().tolist()
-                            ms = mask[b].detach().cpu().tolist()
-                            inp = input_ids[b].detach().cpu().tolist()
-                            # Keep token strings for visualization (safe access)
-                            tok = None
-                            try:
-                                proc = getattr(self, 'processing_class', None)
-                                if proc is None:
-                                    proc = getattr(self, 'tokenizer', None)
-                                if proc is not None:
-                                    tokenizer = getattr(proc, 'tokenizer', proc)
-                                    tok = tokenizer.convert_ids_to_tokens(inp)
-                            except Exception:
-                                tok = None
-                            # Build record at full sequence length (unshifted indices)
-                            # We store also the aligned region indices for convenience
-                            record = {
-                                'global_step': int(self.state.global_step),
-                                'epoch': float(self.state.epoch) if self.state.epoch is not None else None,
-                                'sample_index': 0,
-                                'input_ids': inp,
-                                'token_strs': tok,
-                                'pred_ids_shift': ps,
-                                'label_ids_shift': ls,
-                                'mask_shift': ms,
-                                'aligned_offset': 1,  # labels/logits alignment offset
-                                'exp_name': self.exp_name,
-                            }
-                            # Optional: attach sample_id if provided by collator
-                            if 'sample_id' in inputs:
-                                try:
-                                    record['sample_id'] = int(inputs['sample_id'][b])
-                                except Exception:
-                                    pass
-                            # Write JSONL append
-                            import json
-                            with open(self.token_error_path, 'a', encoding='utf-8') as f:
-                                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                            self._token_error_written += 1
-        except Exception as _log_e:
-            # Don't break training on logging errors
-            pass
-
+        
         alignment_loss = alignment_loss.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
         if isinstance(self.weight, torch.Tensor):
             self.weight = self.weight.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
