@@ -3,11 +3,11 @@ export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false
-LATENT_SIZE=10
+LATENT_SIZE=6
 TEACHER_LATENT=08_24-avt_v2_stage1-latent${LATENT_SIZE}-ce_factor1.0-step500
-CKPT=avt_v2_stage1/${TEACHER_LATENT}
+CKPT=Qwen2.5-VL-7B-Instruct
 python -m src.sft_eval_non_dist \
     --bsz 1 \
     --task "mm-reasoning" \
@@ -32,11 +32,11 @@ export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 export TOKENIZERS_PARALLELISM=false
 LATENT_SIZE=10
 TEACHER_LATENT=08_24-avt_v2_stage1-latent${LATENT_SIZE}-ce_factor1.0-step500
-CKPT=avt_v2_stage1/${TEACHER_LATENT}
+CKPT=Qwen2.5-VL-7B-Instruct
 python -m src.sft_eval_non_dist \
     --bsz 1 \
     --task "mm-reasoning" \
@@ -54,17 +54,18 @@ python -m src.sft_eval_non_dist \
     --observation_tokens_only_see_latent_tokens \
     --teacher_latent_dir /home/dids/shiyang/codes/abstract-visual-token/new/precomputed_teacher_latents/${TEACHER_LATENT}
 
+
 export CUDA_HOME=/usr/local/cuda-12.6
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false
 CKPT=Qwen2.5-VL-7B-Instruct
-LATENT_SIZE=10
+LATENT_SIZE=6
 TEACHER_LATENT=08_24-avt_v2_stage1-latent${LATENT_SIZE}-ce_factor1.0-step500
-CKPT=avt_v2_stage1/${TEACHER_LATENT}
+CKPT=Qwen2.5-VL-7B-Instruct
 python -m src.sft_eval_non_dist \
     --bsz 1 \
     --task "mm-reasoning" \

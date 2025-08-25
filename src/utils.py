@@ -60,9 +60,13 @@ def get_args():
                         help="Directory to save analysis artifacts (subset ids, per-epoch cosine stats).")
     parser.add_argument("--sft_analysis_categories", type=str, nargs='+', default=["boxed_start_poss","observation_poss"],
                         help="Token position categories to aggregate: boxed_start_poss, observation_poss, non_observation_poss.")
-    # ===== Masking behavior =====
+    # ===== Eval SFT =====
     parser.add_argument("--mask_latent", action='store_true', default=False,
                         help="If set, make latent tokens (A_i) invisible to all subsequent tokens in build_additive_bias.")
+    parser.add_argument("--eval_on_teacher_sequence", action='store_true', default=False)
+    parser.add_argument("--eval_on_observation_tokens", action='store_true', default=False)
+    parser.add_argument("--observation_tokens_only_see_image_tokens", action='store_true', default=False)
+    parser.add_argument("--observation_tokens_only_see_latent_tokens", action='store_true', default=False)
     # ===== Precomputed teacher latent loading =====
     parser.add_argument("--teacher_latent_dir", type=str, default=None,
                         help="Directory that stores precomputed teacher latents (files named latent_{sample_id:08d}.pt). If not set, defaults to {save_model_path or ./checkpoints}/teacher_latents.")
@@ -876,7 +880,7 @@ def find_segments_1d(ids, token_ids):
     return S
 
 
-def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False):
+def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False, observation_tokens_only_see_image_tokens: bool = False, observation_tokens_only_see_latent_tokens: bool = True):
     """
     input_ids: LongTensor [B, L]
     pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
@@ -953,11 +957,28 @@ def build_additive_bias(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_lat
                         allowed[b][rows_to_block.nonzero(as_tuple=False).squeeze(-1)[:, None], A_idx] = False
 
             if O_idx.numel() and A_idx.numel():
-                # 3) O_i only sees A_i
-                allowed[b][O_idx, :] = False
-                # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
-                if not mask_latent:
-                    allowed[b][O_idx.unsqueeze(1), A_idx] = True
+                assert (observation_tokens_only_see_latent_tokens or observation_tokens_only_see_image_tokens) and not (observation_tokens_only_see_latent_tokens and observation_tokens_only_see_image_tokens), "At most one of observation_tokens_only_see_latent_tokens and observation_tokens_only_see_image_tokens can be True"
+                if observation_tokens_only_see_image_tokens:
+                    # 3) O_i only sees I_i
+                    allowed[b][O_idx, :] = False
+                    allowed[b][O_idx.unsqueeze(1), I_idx] = True
+                if observation_tokens_only_see_latent_tokens:
+                    # 3) O_i only sees A_i
+                    allowed[b][O_idx, :] = False
+                    # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
+                    if not mask_latent:
+                        allowed[b][O_idx.unsqueeze(1), A_idx] = True
+
+                # ② O seg can see itself
+                n = O_idx.numel()
+                ar = torch.arange(n, device=O_idx.device)
+                # 下三角(含对角) : row i 看到 col j 当且仅当 j <= i
+                tri = ar.unsqueeze(1) >= ar.unsqueeze(0)          # (n, n) bool
+
+                # 将局部 (n×n) 三角可见图写回全局 [L×L]
+                rows = O_idx.unsqueeze(1).expand(n, n)            # (n, n)
+                cols = O_idx.unsqueeze(0).expand(n, n)            # (n, n)
+                allowed[b][rows, cols] = tri
 
             if I_idx.numel():
                 # Optional safety: restrict I_i queries to themselves only (identity)
@@ -1042,7 +1063,7 @@ def find_segments_1d_wo_helper_images(ids, token_ids):
 
     return S
 
-def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False):
+def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False, observation_tokens_only_see_latent_tokens: bool=False):
     """
     input_ids: LongTensor [B, L]
     pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
@@ -1090,13 +1111,12 @@ def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_n
                     if rows_to_block.any():
                         allowed[b][rows_to_block.nonzero(as_tuple=False).squeeze(-1)[:, None], A_idx] = False
 
-            if O_idx.numel() and A_idx.numel():
+            if O_idx.numel() and A_idx.numel() and observation_tokens_only_see_latent_tokens:
                 # 3) O_i only sees A_i
                 allowed[b][O_idx, :] = False
                 # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
                 if not mask_latent:
                     allowed[b][O_idx.unsqueeze(1), A_idx] = True
-
     return allowed.unsqueeze(1)
     # Convert to additive bias: 0 for allowed, large_neg for masked
     #attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)

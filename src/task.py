@@ -120,6 +120,8 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
             new_step["content"][0]["text"] = "You are a helpful assistant."
         for j, content in enumerate(new_step["content"]):        
             if content["type"] == "image":
+                #if "image_file_name" not in content:
+                #    print(dataset_root)
                 content["image"] = os.path.join(dataset_root,content.pop("image_file_name")) 
                 if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
@@ -128,6 +130,7 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
             new_step["content"][j] = content
         conversations[i] = new_step
     sample["data"] = conversations
+    
     return sample
 
 def avt_single_input_images_preprocess_function_question_only(sample, dataset_root="", processor=None, max_seq_len=4096, cur_max=-1, id=0, rank=-1):

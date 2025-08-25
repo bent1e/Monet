@@ -122,7 +122,60 @@ def _device() -> torch.device:
     return torch.device("cpu")
 
 
-def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
+def collate_fn_avt_v2_stage1(examples, device):
+    batch = {}
+    metadata = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+    batch_assistant_img_cnts = [sum(1 for step in examples[i][2]['content'] if step["type"] == "image") for i in range(len(examples))]
+    texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
+
+    # replace `<abs_vis_token></abs_vis_token>`` with `<|vision_start|><|image_pad|><|vision_end|>`` for each `<|im_start|>assistant`` content
+    texts = [place_output_image_avt(text) for text in texts]
+    
+    # add `<abs_vis_token><abs_vis_token_pad>...</abs_vis_token>` after each `<|vision_start|><|image_pad|><|vision_end|>` for each `<|im_start|>assistant` content
+    texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
+    
+    image_inputs, _ = process_vision_info(examples)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+
+    total_image_pads = 0    
+    for txt in texts:
+        total_image_pads += txt.count("<|vision_start|><|image_pad|>")
+    assert total_image_pads == len(image_inputs)
+    batch = processor(text=texts, images=image_inputs, return_tensors="pt", padding=True)
+    batch['metadata'] = metadata
+    
+
+    batch["attention_mask_4d"] = {"full_attention": build_additive_bias(
+        input_ids=batch["input_ids"],
+        pad_mask=batch["attention_mask"],
+        token_ids=SPECIAL_id,
+        large_neg=-1e5,
+        mask_latent=getattr(args, 'mask_latent', False),
+        observation_tokens_only_see_latent_tokens=args.observation_tokens_only_see_latent_tokens,
+        observation_tokens_only_see_image_tokens=args.observation_tokens_only_see_image_tokens,
+    ).to(device) }
+
+    
+    observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_end_idx)
+    batch["observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start, end + 1)))
+        batch["observation_poss"].append(poss_of_a_sample)
+
+    batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, img_pad_idx,  img_start_idx, img_end_idx])
+    '''if _rank==0:
+        time_1 = time()
+        print(f"collate time {time_1 - start_time}")'''
+    return batch
+
+def collate_fn_avt_v2_stage2(examples, device, alignment="boxed_start"):
     """Collate function for AVT Stage-2 (single-process, no distributed)."""
     batch = {}
     batch['metadata'] = [ex['metadata'] for ex in examples]
@@ -176,7 +229,8 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
         token_ids=SPECIAL_id,
         large_neg=-1e5,
         mask_latent=getattr(args, 'mask_latent', False),
-    )}
+        observation_tokens_only_see_latent_tokens=args.observation_tokens_only_see_latent_tokens,
+    ).to(device)}
 
     batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_pad_idx)
     batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_pad_idx)
@@ -198,6 +252,18 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
         answer_start_pattern,
         ignore_ids=[end_pad_token_idx, latent_pad_idx]
     )
+
+    observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
+    batch["observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start, end + 1)))
+        batch["observation_poss"].append(poss_of_a_sample)
 
     return batch
 
@@ -229,15 +295,18 @@ def main():
     # In single-process mode, use all indices
     indices = list(range(total))
     shard = indices  # no sharding
-
+    valid_cnt = 0
     with torch.inference_mode():
         rng = range(0, len(shard), bs)
-        pbar = tqdm(rng, desc="precompute", disable=False)
+        pbar = tqdm(rng, desc="eval sft token acc", disable=False)
         mean_acc = 0
         for i in pbar:
             cur_ids = shard[i:i + bs]
             examples = [train_dataset[j] for j in cur_ids]
-            batch = collate_fn_avt_v2_stage2(examples)
+            if args.eval_on_teacher_sequence:
+                batch = collate_fn_avt_v2_stage1(examples, device)
+            else:
+                batch = collate_fn_avt_v2_stage2(examples, device)
 
             # Try to load precomputed teacher latents
             latents = None
@@ -265,25 +334,41 @@ def main():
 
             batch_size = bs
             ce_patch_pos = []   # List[List[int]]
-            for b in range(batch_size):
-                latent_poss = torch.where(batch['student_input_ids'][b] == latent_pad_idx)[0].tolist()
-                ce_patch_pos.append(latent_poss)
-                assert len(latent_poss) == latents[b].shape[0]
+            
 
-            inputs = {
-                'stage': 'avt_v2_stage1',  # produce latent_embeds as trainer_v2_stage2 expects
-                'latent_mode': False,
-                'input_ids': batch['student_input_ids'].to(device),
-                'attention_mask': batch['student_attention_mask'].to(device),
-                'attention_mask_4d': batch['attention_mask_4d'].to(device),
-                'pixel_values': batch['student_pixel_values'].to(device),
-                'image_grid_thw': batch['student_image_grid_thw'].to(device),
-                'labels': batch['student_labels'],
-                'loss_type': ['ce'],
-                'output_latent_embeds': False,
-                'ce_patch_pos': ce_patch_pos,
-                'ce_patch_vec': latents
-            }
+            if args.eval_on_teacher_sequence:
+                inputs = {
+                    'stage': 'avt_v2_stage1',
+                    'latent_mode': False,
+                    'attention_mask_4d': batch['attention_mask_4d'],
+                    'input_ids': batch['input_ids'].to(device),
+                    'pixel_values': batch['pixel_values'].to(device),
+                    'image_grid_thw': batch['image_grid_thw'].to(device),
+                    'labels': batch['labels'],
+                    'loss_type': ['ce'],
+                    'output_latent_embeds': False,
+                    'ce_patch_pos': ce_patch_pos,
+                    'ce_patch_vec': latents
+                }
+            else:
+                for b in range(batch_size):
+                    latent_poss = torch.where(batch['student_input_ids'][b] == latent_pad_idx)[0].tolist()
+                    ce_patch_pos.append(latent_poss)
+                    assert len(latent_poss) == latents[b].shape[0]
+                inputs = {
+                    'stage': 'avt_v2_stage1',
+                    'latent_mode': False,
+                    'input_ids': batch['student_input_ids'].to(device),
+                    'attention_mask': batch['student_attention_mask'].to(device),
+                    'attention_mask_4d': batch['attention_mask_4d'],
+                    'pixel_values': batch['student_pixel_values'].to(device),
+                    'image_grid_thw': batch['student_image_grid_thw'].to(device),
+                    'labels': batch['student_labels'],
+                    'loss_type': ['ce'],
+                    'output_latent_embeds': False,
+                    'ce_patch_pos': ce_patch_pos,
+                    'ce_patch_vec': latents
+                }
             outputs = model(**inputs, return_dict=True)
 
             # ------- token-level error dump (single process) -------
@@ -311,8 +396,18 @@ def main():
                             tok = processor.tokenizer.convert_ids_to_tokens(inp)
                         except Exception:
                             tok = None
-                        
-                        correct_res = (preds_shift[b].to(labels_shift[b].device)[labels_shift[b]!=-100]==labels_shift[b][labels_shift[b]!=-100])
+                        mask = labels_shift[b]!=-100
+                        if args.eval_on_observation_tokens:
+                            if len(batch['observation_poss'][b]) > 0:
+                                valid_cnt+=1
+                                obs_mask = torch.zeros_like(mask)
+                                obs_mask[batch['observation_poss'][b]] = 1
+                                mask = mask & obs_mask.bool()
+                            else:
+                                continue
+                        else:
+                            valid_cnt+=1
+                        correct_res = (preds_shift[b].to(labels_shift[b].device)[mask]==labels_shift[b][mask])
                         acc = (correct_res.sum()/correct_res.shape[0]).item()
                         mean_acc += acc
                         print(f"Step {i}, sample {b}, token acc: {acc:.4f}")
@@ -339,7 +434,7 @@ def main():
                                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                             token_error_written += 1
 
-        mean_acc /= len(pbar)
-        print(f"Mean token accuracy over {len(pbar)} processed batches: {mean_acc:.4f}")
+        mean_acc /= valid_cnt
+        print(f"Mean token accuracy over {valid_cnt} processed batches: {mean_acc:.4f}")
 if __name__ == "__main__":
     main()

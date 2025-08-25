@@ -17,6 +17,7 @@ from src.task import *
 from src.trainer import *
 import random
 import wandb
+from time import time
 seed_everything(seed=42)
 args=get_args()
 
@@ -97,7 +98,7 @@ model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
 
 # Prefer non-reentrant checkpointing to avoid requires_grad warnings (when enabled)
 # Enable gradient checkpointing only on the LM/backbone (not on the frozen visual tower)
-try:
+'''try:
     # Always start from a clean state
     model.gradient_checkpointing_disable()
 
@@ -126,7 +127,7 @@ try:
     else:
         logging.info(f"Gradient checkpointing disabled for stage: {args.stage}")
 except Exception as _e:
-    logging.debug(f"Selective gradient checkpointing setup skipped: {_e}")
+    logging.debug(f"Selective gradient checkpointing setup skipped: {_e}")'''
 
 if args.stage in ['stage1', 'avt_sft', 'avt_stage1']: 
     new_vocab_size = len(processor.tokenizer)
@@ -361,6 +362,8 @@ def collate_fn_avt_sft(examples):
     return batch
 
 def collate_fn_avt_v2_stage1(examples):
+    if _rank == 0:
+        start_time = time()
     batch = {}
     batch['metadata'] = [ex['metadata'] for ex in examples]
     examples = [ex['data'] for ex in examples]
@@ -404,7 +407,9 @@ def collate_fn_avt_v2_stage1(examples):
         batch["observation_poss"].append(poss_of_a_sample)
 
     batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, img_pad_idx,  img_start_idx, img_end_idx])
-
+    '''if _rank==0:
+        time_1 = time()
+        print(f"collate time {time_1 - start_time}")'''
     return batch
 
 

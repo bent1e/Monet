@@ -7,6 +7,7 @@ import gc
 import numpy as np
 from .utils import SFTRepAnalyzer
 import math
+from time import time
 
 class CustomTrainerStage1(SFTTrainer):
         
@@ -428,7 +429,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
             or torch.distributed.get_rank() == 0
         )
 
-        # 日志文件路径
+        '''# 日志文件路径
         log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
@@ -441,7 +442,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
                 writer.writerow([
                     "global_step","epoch",
                     "loss_teacher_ce"
-                ])
+                ])'''
 
     def _current_ce_emphasize_factor(self) -> float:
         """Linear warmup from 1.0 -> target over N steps or ratio of total steps.
@@ -470,12 +471,19 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         """
         Compute training loss and additionally compute token accuracies
         """
+        if self.is_main_process:
+            torch.cuda.synchronize()
+            start_time = time()
         inputs['stage'] = 'avt_v2_stage1'
         inputs['latent_mode'] = True
         inputs['loss_type'] = []
-        outputs = model(**inputs, return_dict=True, output_hidden_states=True)
-
+        #inputs['enable_ce_checkpoint'] = False
+        outputs = model(**inputs, return_dict=True, output_hidden_states=False)
+        '''if self.is_main_process:
+            time_1 = time()
+            print(f"latent forward time {time_1 - start_time}")'''
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        #inputs['enable_ce_checkpoint'] = True
         inputs['latent_mode'] = False
         inputs['ce_patch_pos'] = outputs.ce_patch_pos
         inputs['ce_patch_vec'] = outputs.ce_patch_vec
@@ -483,20 +491,34 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         # Dynamic warmup factor passed to model.forward
         inputs['ce_emphasize_factor'] = self._current_ce_emphasize_factor()
         inputs['loss_type'] = ['ce']
-        (teacher_ce_loss, teacher_outputs) = super().compute_loss(
+        '''(teacher_ce_loss, teacher_outputs) = super().compute_loss(
                 model, 
                 inputs,
                 return_outputs=True, num_items_in_batch=num_items_in_batch
+            )'''
+        teacher_ce_loss = super().compute_loss(
+                model, 
+                inputs,
+                return_outputs=False, num_items_in_batch=num_items_in_batch
             )
+        '''if self.is_main_process:
+            torch.cuda.synchronize()
+            time_2 = time()
+            print(f"ce forward time {time_2 - time_1}")'''
+        #outputs_teacher_loss = teacher_ce_loss.item()
 
+        # Light-touch cleanup without forcing GPU sync every step
+        #del teacher_outputs
+        step = int(getattr(self.state, 'global_step', 0) or 0)
+        if step % 50 == 0:
+            try:
+                gc.collect()
+                # Avoid calling empty_cache() each step
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
         
-        outputs_teacher_loss = teacher_ce_loss.item()
-
-        del teacher_outputs
-        gc.collect()
-        torch.cuda.empty_cache()
-        
-        # --------  写本地文件  --------
+        '''# --------  写本地文件  --------
         if self.is_main_process:
             with open(self.loss_log_path, "a", newline="") as f:
                 writer = csv.writer(f)
@@ -505,9 +527,8 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
                     self.state.epoch,
                     outputs_teacher_loss
                 ])
-        # --------------------------------------------
-        
-        
+        # --------------------------------------------'''
+
         return (teacher_ce_loss, None) if return_outputs else teacher_ce_loss
 
     def on_epoch_end(self):
@@ -533,7 +554,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         )
 
         # 日志文件路径
-        log_dir = self.args.logging_dir or "./logs"
+        '''log_dir = self.args.logging_dir or "./logs"
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
         self.loss_log_path = os.path.join(log_dir, f"loss_history/loss_history_w{self.weight}_{self.exp_name}_{timestamp}.csv")
@@ -547,7 +568,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
                     "loss_total",
                     "loss_student_ce",
                     "loss_align"
-                ])
+                ])'''
 
         self._al_loss_cum = 0.0       # cumulative alignment loss since last log
         self._al_steps = 0            # number of micro-steps accumulated
@@ -659,7 +680,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         self._stu_ce_cum += outputs_student_loss
         self._stu_ce_steps += 1
 
-        if self.is_main_process:
+        '''if self.is_main_process:
             with open(self.loss_log_path, "a", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([
@@ -668,7 +689,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
                     float(loss.detach().item()),
                     outputs_student_loss,
                     float(alignment_loss.detach().item()),
-                ])
+                ])'''
         return (loss, None) if return_outputs else loss
     
     def log(self, logs: dict, start_time: float | None = None):

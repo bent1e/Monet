@@ -46,6 +46,7 @@ from transformers.utils import TransformersKwargs, auto_docstring, can_return_tu
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLConfig, Qwen2_5_VLTextConfig, Qwen2_5_VLVisionConfig
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLPreTrainedModel
 import os
+from torch.utils.checkpoint import checkpoint
 os.environ["TRANSFORMERS_NO_AUTO_DOCSTRING"] = "1"
 
 logger = logging.get_logger(__name__)
@@ -1208,6 +1209,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         ce_patch_pos: Optional[List[List[int]]] = None, 
         ce_patch_vec: Optional[List[torch.Tensor]] = None,
         stage: str = "",
+        enable_ce_checkpoint: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
         r"""
@@ -1396,7 +1398,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         no_grad_mode: bool,
                         **kwargs):
 
-                ctx = torch.no_grad() if no_grad_mode else nullcontext()
+                ctx = torch.inference_mode() if no_grad_mode else nullcontext()
 
                 with ctx:
                     out = language_model(
@@ -1688,7 +1690,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             return output if return_dict else output.to_tuple()
         # ---------- END latent_mode implementation ----------
 
-
         else: # latent_mode == False
             if ce_patch_pos is not None and ce_patch_vec is not None: # latent-ce_loss forward
                 # 确保 dtype/device 一致；注意 ce_patch_vec 已经 detach
@@ -1714,6 +1715,51 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 cache_position=cache_position,
                 **kwargs,
             )
+        
+            '''else:  # latent_mode == False (CE forward)
+                # If we collected latent vectors, write them into inputs_embeds (your original code)
+                if ce_patch_pos is not None and ce_patch_vec is not None:
+                    for b in range(len(ce_patch_pos)):
+                        pos_list = ce_patch_pos[b]
+                        if not pos_list:
+                            continue
+                        vecs = ce_patch_vec[b].to(inputs_embeds.device, inputs_embeds.dtype)  # keep grad
+                        inputs_embeds[b, torch.tensor(pos_list, device=inputs_embeds.device, dtype=torch.long), :] = vecs
+
+                def _lm_call(inp_embeds, pos_ids, attn_m, pkv, use_cache_flag):
+                    # Wrap the original language_model call
+                    return self.language_model(
+                        input_ids=None,
+                        position_ids=pos_ids,
+                        attention_mask=attn_m,
+                        past_key_values=pkv,
+                        inputs_embeds=inp_embeds,
+                        use_cache=use_cache_flag,                  # will be False under checkpoint
+                        output_attentions=output_attentions,
+                        output_hidden_states=output_hidden_states,
+                        return_dict=True,
+                        cache_position=cache_position,
+                        **kwargs,
+                    )
+
+                # IMPORTANT:
+                # For checkpoint to work we must set use_cache=False to avoid stateful KV during recomputation.
+                if self.training and enable_ce_checkpoint:
+                    # Prepare minimal tensor-only args for checkpoint
+                    _inp = inputs_embeds
+                    _pos = position_ids
+                    _att = (attention_mask_4d if attention_mask_4d is not None else attention_mask)
+
+                    def _wrapped(inp, pos, att):
+                        return _lm_call(inp, pos, att, past_key_values, use_cache_flag=False)
+
+                    outputs = checkpoint(_wrapped, _inp, _pos, _att, use_reentrant=False)
+                else:
+                    outputs = _lm_call(
+                        inputs_embeds, position_ids,
+                        (attention_mask_4d if attention_mask_4d is not None else attention_mask),
+                        past_key_values, use_cache_flag=use_cache
+                    )'''
 
             hidden_states_to_return = []
             if output_hidden_states:
@@ -1736,6 +1782,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             )
             return output if return_dict else output.to_tuple()
 
+        ''''''
 
 @dataclass
 @auto_docstring(
@@ -1847,6 +1894,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         loss_type: Optional[List[str]] = [],
         output_latent_embeds: bool = False,
         stage: str = "",
+        enable_ce_checkpoint: bool = False,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLCausalLMOutputWithPast]:
         r"""
@@ -1898,7 +1946,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-
+    
         outputs = self.model(
             input_ids=input_ids,
             pixel_values=pixel_values,
@@ -1922,6 +1970,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             ce_patch_pos=ce_patch_pos,
             ce_patch_vec=ce_patch_vec,
             stage=stage,
+            enable_ce_checkpoint=enable_ce_checkpoint,
             **kwargs,
         )
 
