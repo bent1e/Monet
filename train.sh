@@ -178,9 +178,9 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
 #####################################################################
 # On ALL nodes, set these variables consistently.
 # On node0, set NODE_RANK=0; on node1, set NODE_RANK=1.
-export MASTER_ADDR="<node0-hostname-or-ip>"
+export MASTER_ADDR="172.16.0.9"
 export MASTER_PORT=29501
-export NNODES=2
+export NNODES=1
 export NODE_RANK=0          # change to 1 on the second node
 export GPUS_PER_NODE=4      # GPUs per node
 
