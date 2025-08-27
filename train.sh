@@ -174,6 +174,54 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --deepspeed ./deepspeed/ds_zero2_gpu.json
 
 #####################################################################
+# AVT v2 stage1 — MULTI-NODE (example: 2 nodes, 4 GPUs each)
+#####################################################################
+# On ALL nodes, set these variables consistently.
+# On node0, set NODE_RANK=0; on node1, set NODE_RANK=1.
+export MASTER_ADDR="<node0-hostname-or-ip>"
+export MASTER_PORT=29501
+export NNODES=2
+export NODE_RANK=0          # change to 1 on the second node
+export GPUS_PER_NODE=4      # GPUs per node
+
+# Optional NCCL/network tuning (adjust to your cluster fabric)
+export NCCL_DEBUG=WARN
+# export NCCL_SOCKET_IFNAME=eth0    # uncomment and set to your NIC if needed
+# export NCCL_IB_DISABLE=1          # uncomment if no InfiniBand is available
+export TORCH_NCCL_BLOCKING_WAIT=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+
+conda activate mirage
+cd /home/dids/shiyang/codes/abstract-visual-token
+export TOKENIZERS_PARALLELISM=false
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+
+torchrun --nnodes $NNODES --node-rank $NODE_RANK \
+  --nproc-per-node $GPUS_PER_NODE \
+  --master-addr $MASTER_ADDR --master-port $MASTER_PORT \
+  -m src.main \
+    --epochs 2 \
+    --bsz 1 \
+    --grad_accum_steps 16 \
+    --task "mm-reasoning" \
+    --stage "avt_v2_stage1" \
+    --data_path \
+    "./new/created_dataset/filtered_data/CoF/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/PixelReasoner/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/Zebra_CoT_geometry/filtered_train_w_metadata.json" \
+    "./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000_w_metadata.json" \
+    "./new/created_dataset/filtered_data/VTS_1/filtered_train_short3000_w_metadata.json" \
+    --log_file "./log.txt" \
+    --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
+    --latent_size 10 \
+    --ce_emphasize_factor 1.0 \
+    --deepspeed ./deepspeed/ds_zero2_gpu.json
+
+#####################################################################
 # AVT v2 stage2
 #####################################################################
 export CUDA_HOME=/usr/local/cuda-12.6

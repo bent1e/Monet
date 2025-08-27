@@ -273,6 +273,12 @@ def main():
     exp_name = args.load_model_path.split('/')[-1]
     if args.mask_latent:
         exp_name += "-mask_latent"
+    if args.observation_tokens_only_see_latent_tokens:
+        exp_name += "-obs_see_latent"
+    if not args.eval_on_teacher_sequence:
+        exp_name += "-student"
+    else:
+        exp_name += "-teacher"
     exp_name += dataset_names
     token_error_log_interval = 20
     token_error_max_records = 20
