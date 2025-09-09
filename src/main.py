@@ -168,6 +168,100 @@ for param in model.visual.parameters():
     param.requires_grad = False
 
 
+def collate_fn_stage1(examples):
+    batch = {}
+    batch['metadata'] = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+
+    texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
+
+    texts = [place_input_image(text) for text in texts]
+    texts = [place_output_image(text) for text in texts]
+    texts = replace_visual_spectial_tokens(texts)
+
+    image_inputs, _ = process_vision_info(examples)
+
+    user_examples = remove_assistant_images(examples)
+    user_text = [processor.apply_chat_template(example, tokenize=False) for example in user_examples]
+    user_text = replace_visual_spectial_tokens(user_text)
+    user_image_inputs, _ = process_vision_info(user_examples)
+    user_batch = processor(text=user_text, images=user_image_inputs, return_tensors="pt", padding=True)
+
+    assistant_examples = remove_user_images(examples)
+    assistant_text = [processor.apply_chat_template(example, tokenize=False) for example in assistant_examples]
+    assistant_text = replace_visual_spectial_tokens(assistant_text)
+    assistant_image_inputs, _ = process_vision_info(assistant_examples)
+    assistant_batch = processor(text=assistant_text, images=assistant_image_inputs, return_tensors="pt", padding=True)
+
+    batch = processor(text=texts, images=image_inputs, return_tensors="pt", padding=True)
+
+    batch['pixel_values'] = user_batch['pixel_values']
+    batch['image_grid_thw'] = user_batch['image_grid_thw']
+
+    batch['pixel_values_latent'] = assistant_batch['pixel_values']
+    batch['image_grid_thw_latent'] = assistant_batch['image_grid_thw']
+
+    latent_token_idx = processor.tokenizer("<|latent_pad|>", return_tensors="pt")["input_ids"][0]
+    latent_start_idx = processor.tokenizer("<|latent_start|>", return_tensors="pt")["input_ids"][0]
+    latent_end_idx = processor.tokenizer("<|latent_end|>", return_tensors="pt")["input_ids"][0]
+
+    pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
+
+    new_input_ids, new_attention_mask = process_batch(batch["input_ids"], batch["attention_mask"], 
+                                                      latent_start_idx, latent_end_idx, latent_token_idx, args.latent_size, pad_token_idx)
+
+    batch["input_ids"] = new_input_ids
+    batch["attention_mask"] = new_attention_mask
+
+    answer_start_token_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
+
+    labels = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_token_pattern, pad_token_idx, latent_token_idx)
+    batch["labels"] = labels
+
+    image_out_mask = mask_image_output_tokens(batch["input_ids"], latent_start_idx, latent_token_idx)
+    batch["image_out_mask"] = image_out_mask
+
+    return batch
+
+def collate_fn_stage2(examples):
+    texts = [processor.apply_chat_template(example, tokenize=False) for example in examples]
+    
+    texts = [place_input_image(text) for text in texts]
+    texts = [place_output_image(text) for text in texts]
+    texts = replace_visual_spectial_tokens(texts)
+    
+    image_inputs, _ = process_vision_info(examples)
+
+    user_examples = remove_assistant_images(examples)
+    user_text = [processor.apply_chat_template(example, tokenize=False) for example in user_examples]
+    user_text = replace_visual_spectial_tokens(user_text)
+    user_image_inputs, _ = process_vision_info(user_examples)
+    user_batch = processor(text=user_text, images=user_image_inputs, return_tensors="pt", padding=True)
+
+    batch = processor(text=texts, images=image_inputs, return_tensors="pt", padding=True)
+    
+    batch['pixel_values'] = user_batch['pixel_values']
+    batch['image_grid_thw'] = user_batch['image_grid_thw']
+
+    latent_token_idx = processor.tokenizer("<|latent_pad|>", return_tensors="pt")["input_ids"][0]
+    latent_start_idx = processor.tokenizer("<|latent_start|>", return_tensors="pt")["input_ids"][0]
+    latent_end_idx = processor.tokenizer("<|latent_end|>", return_tensors="pt")["input_ids"][0]
+
+    pad_token_idx = processor.tokenizer("<|endoftext|>", return_tensors="pt")["input_ids"][0]
+
+    new_input_ids, new_attention_mask = process_batch(batch["input_ids"], batch["attention_mask"], 
+                                                      latent_start_idx, latent_end_idx, latent_token_idx, args.latent_size, pad_token_idx)
+
+    batch["input_ids"] = new_input_ids
+    batch["attention_mask"] = new_attention_mask
+
+    answer_start_token_pattern = processor.tokenizer("<|im_start|>assistant", return_tensors="pt")["input_ids"][0]
+
+    labels = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_token_pattern, pad_token_idx, latent_token_idx)
+    batch["labels"] = labels
+    
+    return batch
+
 
 
 def collate_fn_avt_stage1(examples, alignment="boxed_start"):
@@ -475,10 +569,19 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
     batch["student_input_ids"] = student_batch["input_ids"]
     batch["student_attention_mask"] = student_batch["attention_mask"]
 
+    if args.mask_latent:
+        attn_mask_4d = build_4d_attn_wo_helper_images(
+            input_ids=batch["student_input_ids"],
+            pad_mask=batch["student_attention_mask"],
+            token_ids=SPECIAL_id,
+            mask_latent=getattr(args, 'mask_latent', False),
+        )
+        batch["student_attention_mask_4d"] = {"full_attention": attn_mask_4d }
+
     batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_pad_idx)
     batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_pad_idx)
 
-    latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_start_idx)
+    '''latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_start_idx)
     latent_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_end_idx)
     batch["ce_emphasize_poss"] = []
     for start_poss, end_poss in zip(latent_start_poss, latent_end_poss):
@@ -487,13 +590,122 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
             assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
             poss_of_a_sample.extend(start_poss)
             poss_of_a_sample.extend(end_poss)
-        batch["ce_emphasize_poss"].append(poss_of_a_sample)
+        batch["ce_emphasize_poss"].append(poss_of_a_sample)'''
 
+
+    observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
+    batch["observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start+1, end)))
+        batch["observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
     batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
 
     return batch
+
+def collate_fn_avt_v3(examples, alignment="boxed_start"):
+    # Support wrapped examples providing sample_id
+    batch = {}
+    batch['metadata'] = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+    batch_assistant_img_cnts = [sum(1 for step in examples[i][2]['content'] if step["type"] == "image") for i in range(len(examples))]
+    texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
+
+    # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
+    texts = [place_output_image_avt(text) for text in texts]
+    
+    ################################################
+    # teacher
+    ################################################
+    image_inputs, _ = process_vision_info(examples)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+    teacher_texts = texts
+    teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
+    total_image_pads = 0
+    for txt in texts:
+        total_image_pads += txt.count("<|image_pad|>")
+    assert total_image_pads == len(image_inputs)
+    batch['teacher_pixel_values'] = teacher_batch['pixel_values']
+    batch['teacher_image_grid_thw'] = teacher_batch['image_grid_thw']
+    batch['teacher_input_ids'] = teacher_batch['input_ids']
+    batch['teacher_attention_mask'] = teacher_batch['attention_mask']
+    
+    batch['teacher_segs'] = []
+    for b in range(teacher_batch['input_ids'].shape[0]):
+        q_img_idx, segs = find_helper_img_segs(teacher_batch['input_ids'][b], SPECIAL_id)
+        batch['teacher_segs'].append(segs)
+    ################################################
+    # student
+    ################################################
+    # replace <|vision_start|><|image_pad|><|vision_end|> with <abs_vis_token><abs_vis_token_pad>...</abs_vis_token> for each <|im_start|>assistant content
+    student_texts = replace_visual_spectial_tokens_avt(texts, args.latent_size, "<abs_vis_token_pad>")
+    user_examples = remove_assistant_images(examples)
+    user_image_inputs, _ = process_vision_info(user_examples)
+    resize_ptr = 0
+    if new_sizes is not None:
+        for i, img in enumerate(user_image_inputs):
+            img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)
+            user_image_inputs[i] = img
+            resize_ptr += batch_assistant_img_cnts[i] + 1 # user_image_inputs only contain question images of each batch sample, so we need to skip the helper images in the new_sizes by adding batch_assistant_img_cnts[i]
+    student_batch = processor(text=student_texts, images=user_image_inputs, return_tensors="pt", padding=True)
+    total_image_pads = 0
+    for txt in student_texts:
+        total_image_pads += txt.count("<|image_pad|>")
+    assert total_image_pads == len(user_image_inputs)
+    batch['student_pixel_values'] = student_batch['pixel_values']
+    batch['student_image_grid_thw'] = student_batch['image_grid_thw']
+    batch["student_input_ids"] = student_batch["input_ids"]
+    batch["student_attention_mask"] = student_batch["attention_mask"]
+
+    if args.mask_latent:
+        attn_mask_4d = build_4d_attn_wo_helper_images(
+            input_ids=batch["student_input_ids"],
+            pad_mask=batch["student_attention_mask"],
+            token_ids=SPECIAL_id,
+            mask_latent=getattr(args, 'mask_latent', False),
+        )
+        batch["student_attention_mask_4d"] = {"full_attention": attn_mask_4d }
+
+    batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_pad_idx)
+    batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_pad_idx)
+
+    '''latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_start_idx)
+    latent_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_end_idx)
+    batch["ce_emphasize_poss"] = []
+    for start_poss, end_poss in zip(latent_start_poss, latent_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            poss_of_a_sample.extend(start_poss)
+            poss_of_a_sample.extend(end_poss)
+        batch["ce_emphasize_poss"].append(poss_of_a_sample)'''
+
+
+    observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
+    batch["observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start+1, end)))
+        batch["observation_poss"].append(poss_of_a_sample)
+
+    # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
+
+    return batch
+
+
 
 
 preprocess_function = task_preporcess_config[args.task]
@@ -562,6 +774,9 @@ elif args.stage == 'avt_v2_stage1':
 elif args.stage == 'avt_v2_stage2':
     CustomTrainer = CustomTrainerAVT_V2_Stage2
     collate_fn = partial(collate_fn_avt_v2_stage2)
+elif args.stage == 'avt_v3':
+    CustomTrainer = CustomTrainerAVT_V3
+    collate_fn = partial(collate_fn_avt_v3)
 
 if args.deepspeed != "":
     print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
@@ -573,6 +788,8 @@ elif args.stage == 'avt_v2_stage2':
 elif args.stage == 'avt_sft':
     gradient_checkpointing = True
 elif args.stage == 'avt_stage1':
+    gradient_checkpointing = True
+elif args.stage == 'avt_v3':
     gradient_checkpointing = True
 
 training_args = SFTConfig(
@@ -628,11 +845,18 @@ elif args.stage == 'avt_v2_stage2':
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
     setattr(training_args, 'alignment_weight', args.alignment_weight)
     setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})
+    setattr(training_args, 'alignment_layer', args.alignment_layer)
     # Propagate teacher_latent_dir so trainer can load cached latents
     import os as _os
     _tld = args.teacher_latent_dir if getattr(args, 'teacher_latent_dir', None) else _os.path.join(save_dir, 'teacher_latents')
     setattr(training_args, 'teacher_latent_dir', _tld)
 
+elif args.stage == 'avt_v3':
+    setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
+    setattr(training_args, 'alignment_weight', args.alignment_weight)
+    setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})
+    setattr(training_args, 'align_vision_latent_loss_weight', args.align_vision_latent_loss_weight)
+    setattr(training_args, 'latent_size', args.latent_size)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(

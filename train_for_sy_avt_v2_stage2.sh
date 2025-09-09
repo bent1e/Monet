@@ -36,6 +36,7 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --wandb_name ${SAVE_CKPT} \
   --dataset_root /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual \
-  --teacher_latent_dir /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/precomputed_teacher_latents/${LOAD_CKPT}
+  --teacher_latent_dir /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/precomputed_teacher_latents/${LOAD_CKPT} \
+  --alignment_layer all_layers
   
   

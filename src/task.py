@@ -124,7 +124,10 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
             if content["type"] == "image":
                 #if "image_file_name" not in content:
                 #    print(dataset_root)
-                img_file_name = content.pop("image_file_name")
+                if "image_file_name" in content:
+                    img_file_name = content.pop("image_file_name")
+                else:
+                    img_file_name = content.pop("image")
                 if "kling_mm" in dataset_root:
                     img_file_name = img_file_name.replace("created_dataset/filtered_data/", "")
                 content["image"] = os.path.join(dataset_root, img_file_name)

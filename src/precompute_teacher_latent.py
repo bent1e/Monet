@@ -263,20 +263,30 @@ def main():
                         'labels': None,
                         'alignment_poss': batch['teacher_alignment_poss'],
                         'loss_type': [],
-                        'output_latent_embeds': True,
                     }
+                    if args.output_latent_embeds:
+                        inputs['output_latent_embeds'] = True
+                    if args.output_hidden_states:
+                        inputs['output_hidden_states'] = True
+
                     outputs = model(**inputs, return_dict=True)
 
-                    latents = outputs.latent_embeds
+                    if args.output_latent_embeds:
+                        teacher_reps = outputs.latent_embeds
+                    elif args.output_hidden_states:
+                        teacher_reps = outputs.hidden_states
                     # Save per global sample index to avoid collisions
-                    B = len(latents)
-                    for b in tqdm(range(B), desc="Saving latents", total=B):
+                    B = len(teacher_reps)
+                    for b in range(B):
                         metadata = batch['metadata'][b]
                         dataset_name = metadata['dataset_name']
                         sample_id = metadata['sample_id']
-                        metadata_info = f"{dataset_name}_{sample_id}"
+                        if args.output_latent_embeds:
+                            metadata_info = f"last_layer_{dataset_name}_{sample_id}"
+                        elif args.output_hidden_states:
+                            metadata_info = f"all_layers_{dataset_name}_{sample_id}"
                         save_path = os.path.join(out_dir, f"latent_{metadata_info}.pt")
-                        torch.save({'metadata_info': metadata_info, 'latent': latents[b].detach().cpu()}, save_path)
+                        torch.save({'metadata_info': metadata_info, 'latent': teacher_reps[b].detach().cpu()}, save_path)
                 except Exception as e:
                     logging.exception(f"[rank {rank}] Failed at batch start={i}, ids={cur_ids}: {e}")
                     # Continue processing other batches instead of crashing and hanging other ranks

@@ -16,7 +16,7 @@ def get_args():
     # ===== Basic arguments =====
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/model_stage1')
     parser.add_argument("--data_path", type=str, default='PathToJsonlData', nargs='+')
-    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1', 'avt_v2_stage1', 'avt_v2_precompute_latent', 'avt_v2_stage2'])
+    parser.add_argument("--stage", type=str, default="avt_stage1", choices=['avt_sft', 'avt_stage1', 'avt_v2_stage1', 'avt_v2_precompute_latent', 'avt_v2_stage2', 'avt_v3'])
     parser.add_argument("--task", type=str, default="vsp-spatial-reasoning", choices=["vsp-spatial-reasoning", "vsp-spatial-planning", "blink-jigsaw", "sat", "mm-reasoning"])
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/',help="Path to save the model checkpoints.")
     parser.add_argument("--resume_from_checkpoint", default=False, action="store_true")
@@ -48,6 +48,10 @@ def get_args():
 
     # ==== AVT v2 stage2 arguments =====
     parser.add_argument("--alignment_weight", default=1.0, help="Weight of the alignment loss in avt_stage1.")
+    parser.add_argument("--alignment_layer", choices=["all_layers", "last_layer"])
+
+    # ===== AVT v3 =====
+    
 
     # ===== Training record arguments =====
     parser.add_argument("--log_file", type=str, default='./log.txt')
@@ -85,6 +89,8 @@ def get_args():
     parser.add_argument("--teacher_latent_dir", type=str, default=None,
                         help="Directory that stores precomputed teacher latents (files named latent_{sample_id:08d}.pt). If not set, defaults to {save_model_path or ./checkpoints}/teacher_latents.")
     parser.add_argument("--attn_analysis", action='store_true', default=False)
+    parser.add_argument("--output_latent_embeds", action='store_true', default=False)
+    parser.add_argument("--output_hidden_states", action='store_true', default=False)
     # DeepSpeed config path (optional). If provided, Trainer will enable DeepSpeed with this config.
     # ===== PPL analysis =====
     parser.add_argument("--no_question_image", action='store_true', default=False)
@@ -872,6 +878,34 @@ class SFTRepAnalyzer:
     def save_state(self):
         torch.save({'subset_ids': self.subset_ids}, os.path.join(self.exp_save_folder, 'state.pt'))
 
+def find_helper_img_segs(ids, token_ids):
+    device = ids.device
+    def between(start_pos, end_pos, wanted_id=None):
+        s = start_pos + 1
+        e = end_pos
+        if s >= e:
+            return torch.empty(0, dtype=torch.long, device=device)
+        if wanted_id is None:
+            return torch.arange(s, e, device=device, dtype=torch.long)
+        mask = (ids[s:e] == wanted_id)
+        return torch.nonzero(mask, as_tuple=False).squeeze(-1) + s
+    v_starts = torch.nonzero(ids == token_ids['v_start'], as_tuple=False).squeeze(-1)
+    v_ends   = torch.nonzero(ids == token_ids['v_end'],   as_tuple=False).squeeze(-1)
+    v_ptr, e_ptr = 0, 0
+    Vs, Ve = [], []
+    while v_ptr < v_starts.numel() and e_ptr < v_ends.numel():
+        if v_starts[v_ptr] < v_ends[e_ptr]:
+            Vs.append(v_starts[v_ptr].item()); Ve.append(v_ends[e_ptr].item())
+            v_ptr += 1; e_ptr += 1
+        else:
+            e_ptr += 1
+    # drop the question image (first vision pair)
+    Q_img_idx = between(Vs[0], Ve[0], wanted_id=token_ids['img_pad'])
+    if len(Vs) > 0 and len(Ve) > 0:
+        Vs = Vs[1:]
+        Ve = Ve[1:]
+    helper_img_segs = [[between(vs, ve, wanted_id=token_ids['img_pad'])] for vs, ve in zip(Vs, Ve)]
+    return Q_img_idx, helper_img_segs
 
 
 def find_segments_1d(ids, token_ids):
@@ -1261,7 +1295,7 @@ def find_segments_1d_wo_helper_images(ids, token_ids):
 
     return S
 
-def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False, observation_tokens_only_see_latent_tokens: bool=False):
+def build_4d_attn_wo_helper_images(input_ids, pad_mask, token_ids, large_neg=-1e5, mask_latent: bool = False, observation_tokens_only_see_latent_tokens: bool=False):
     """
     input_ids: LongTensor [B, L]
     pad_mask:  LongTensor/BoolTensor [B, L], 1/True for real tokens
@@ -1309,12 +1343,12 @@ def build_additive_bias_wo_helper_images(input_ids, pad_mask, token_ids, large_n
                     if rows_to_block.any():
                         allowed[b][rows_to_block.nonzero(as_tuple=False).squeeze(-1)[:, None], A_idx] = False
 
-            if O_idx.numel() and A_idx.numel() and observation_tokens_only_see_latent_tokens:
+            '''if O_idx.numel() and A_idx.numel() and observation_tokens_only_see_latent_tokens:
                 # 3) O_i only sees A_i
                 allowed[b][O_idx, :] = False
                 # If mask_latent is enabled, O_i cannot see A_i either; otherwise allow.
                 if not mask_latent:
-                    allowed[b][O_idx.unsqueeze(1), A_idx] = True
+                    allowed[b][O_idx.unsqueeze(1), A_idx] = True'''
     return allowed.unsqueeze(1)
     # Convert to additive bias: 0 for allowed, large_neg for masked
     #attn_bias = torch.zeros((B, 1, L, L), dtype=dtype_bias, device=device)

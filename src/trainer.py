@@ -963,6 +963,8 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
             or torch.distributed.get_rank() == 0
         )
 
+        self.observation_token_acc = 0.
+        self.observation_token_acc_step = 0
         self._al_loss_cum = 0.0       # cumulative alignment loss since last log
         self._al_steps = 0            # number of micro-steps accumulated
         self._stu_ce_cum = 0.0        # cumulative student CE loss
@@ -992,33 +994,29 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         use_cached = False
         batch_metadata = inputs.get('metadata', None)
         if batch_metadata is not None and self.teacher_latent_dir and os.path.isdir(self.teacher_latent_dir):
-            try:
-                latents_list = []
-                for metadata in batch_metadata:
-                    dataset_name = metadata['dataset_name']
-                    sample_id = metadata['sample_id']
-                    metadata_info = f"{dataset_name}_{sample_id}"
-                    path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
-                    if not os.path.isfile(path):
-                        latents_list = []
-                        break
-                    data = torch.load(path, map_location='cpu')
-                    latents_list.append(data['latent'])
-                if batch_metadata is not None and len(latents_list) == len(batch_metadata):
-                    latents = torch.stack([t if t.dim() == 2 else t.squeeze(0) for t in latents_list], dim=0).to(model.device)
-                    class _Obj:
-                        pass
-                    teacher_outputs = _Obj()
-                    teacher_outputs.latent_embeds = latents
-                    use_cached = True
-            except Exception:
-                use_cached = False
-                teacher_outputs = None
+            latents_list = []
+            for metadata in batch_metadata:
+                dataset_name = metadata['dataset_name']
+                sample_id = metadata['sample_id']
+                metadata_info = f"{self.args.alignment_layer}_{dataset_name}_{sample_id}"
+                path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
+                if not os.path.isfile(path):
+                    latents_list = []
+                    raise RuntimeError(f"Missing teacher latent file: {path}")
+                data = torch.load(path, map_location='cpu')
+                latents_list.append(data['latent'])
+            if batch_metadata is not None and len(latents_list) == len(batch_metadata):
+                class _Obj:
+                    pass
+                teacher_outputs = _Obj()
+                teacher_outputs.latent_embeds = latents_list
+                use_cached = True
 
         # Fallback to online teacher forward
         if not use_cached:
-            with torch.no_grad():
-                teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
+            raise NotImplementedError("Online teacher forward not implemented; precompute and save teacher latents first.")
+            #with torch.no_grad():
+            #    teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
 
         # Student alignment forward
         inputs['latent_mode'] = True
@@ -1043,12 +1041,18 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         inputs['ce_patch_pos'] = student_outputs.ce_patch_pos
         inputs['ce_patch_vec'] = student_outputs.ce_patch_vec
         inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
+        inputs['ce_emphasize_poss'] = inputs['observation_poss']
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         inputs['loss_type'] = ['ce']
+        inputs['compute_emphasize_acc'] = True
+        if 'student_attention_mask_4d' in inputs:
+            inputs['attention_mask_4d'] = inputs.pop('student_attention_mask_4d')
         (student_ce_loss, student_outputs) = super().compute_loss(
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
-
+        if getattr(student_outputs, 'mean_emphasize_acc', None) is not None:
+            self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
+            self.observation_token_acc_step += 1
         
         alignment_loss = alignment_loss.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
         if isinstance(self.weight, torch.Tensor):
@@ -1092,17 +1096,144 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         merged = dict(logs)
         if self._al_steps > 0:
             merged["alignment_loss"] = round(self._al_loss_cum / max(1, self._al_steps), 6)
+            self._al_loss_cum = 0.0
+            self._al_steps = 0
         if self._stu_ce_steps > 0:
             merged["student_ce_loss"] = round(self._stu_ce_cum / max(1, self._stu_ce_steps), 6)
-
-        # Reset accumulators after logging so the next window starts fresh
-        self._al_loss_cum = 0.0
-        self._al_steps = 0
-        self._stu_ce_cum = 0.0
-        self._stu_ce_steps = 0
+            self._stu_ce_cum = 0.0
+            self._stu_ce_steps = 0
+        if self.observation_token_acc_step > 0:
+            merged["observation_token_acc"] = round(self.observation_token_acc/ max(1, self.observation_token_acc_step), 6)
+            self.observation_token_acc = 0.
+            self.observation_token_acc_step = 0
 
         # Call parent to keep default behavior (console/TB/W&B/etc.)
         return super().log(merged, start_time)
+
+class CustomTrainerAVT_V3(SFTTrainer):
+    def __init__(self, *args, **kwargs): 
+        self.exp_name =kwargs.pop('exp_name')
+        super().__init__(*args, **kwargs)
+        self.weight = self.args.alignment_weight
+        self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
+        # Where to read precomputed teacher latents
+        base_save = getattr(self.args, 'output_dir', './checkpoints')
+        self.teacher_latent_dir = getattr(self.args, 'teacher_latent_dir', None)
+        if not self.teacher_latent_dir:
+            # fall back to user-specified save_model_path-like; use output_dir parent by default
+            self.teacher_latent_dir = os.path.join(base_save if base_save else './checkpoints', 'teacher_latents')
+        # 仅 rank‑0 进程写文件，防止多卡重复
+        self.is_main_process = (
+            not torch.distributed.is_initialized()
+            or torch.distributed.get_rank() == 0
+        )
+
+        self.observation_token_acc = 0.
+        self.observation_token_acc_step = 0
+        self.align_vision_latent_loss_cum = 0.
+        self.align_vision_latent_loss_steps = 0
+        self._stu_ce_cum = 0.0        # cumulative student CE loss
+        self._stu_ce_steps = 0
+
+
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        # Prepare teacher forward inputs (for latent extraction)
+        inputs['stage'] = 'avt_v3'
+        inputs['latent_mode'] = False
+        inputs['input_ids'] = inputs['teacher_input_ids']
+        inputs['attention_mask'] = inputs['teacher_attention_mask']
+        inputs['pixel_values'] = inputs['teacher_pixel_values']
+        inputs['image_grid_thw'] = inputs['teacher_image_grid_thw']
+        inputs['labels'] = None
+        inputs['alignment_poss'] = inputs['teacher_alignment_poss']
+        model.gradient_checkpointing_disable()
+        inputs['loss_type'] = []
+        inputs['segs'] = inputs['teacher_segs']
+        inputs['output_helper_img_embeds'] = True
+        with torch.no_grad():
+            teacher_outputs = model(**inputs)
+
+        # Student alignment forward
+        inputs['latent_mode'] = True
+        inputs['input_ids'] = inputs['student_input_ids']
+        inputs['attention_mask'] = inputs['student_attention_mask']
+        inputs['pixel_values'] = inputs['student_pixel_values']
+        inputs['image_grid_thw'] = inputs['student_image_grid_thw']
+        if 'labels' in inputs:
+            inputs.pop('labels')
+        inputs['alignment_poss'] = inputs['student_alignment_poss']
+        inputs['teacher_hidden_states_for_alignment'] = teacher_outputs.latent_embeds
+        model.gradient_checkpointing_disable()
+        inputs['loss_type'] = ['alignment']
+        inputs['output_latent_embeds'] = False
+        inputs['segs'] = None
+        inputs['loss_type'] = []
+        student_outputs_latent = model(**inputs)
+
+        # Student CE forward
+        inputs['latent_mode'] = False
+        inputs['labels'] = inputs['student_labels']
+        inputs['align_vision_latent_pre_result'] = teacher_outputs.align_vision_latent_pre_result
+        inputs['latent_size'] = self.args.latent_size
+        inputs['ce_patch_pos'] = student_outputs_latent.ce_patch_pos
+        inputs['ce_patch_vec'] = student_outputs_latent.ce_patch_vec
+        inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
+        inputs['ce_emphasize_poss'] = inputs['observation_poss']
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        inputs['loss_type'] = ['ce', 'align_vision_latent_projector']
+        inputs['compute_emphasize_acc'] = True
+        if 'student_attention_mask_4d' in inputs:
+            inputs['attention_mask_4d'] = inputs.pop('student_attention_mask_4d')
+        (student_ce_loss, student_outputs) = super().compute_loss(
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        )
+        if getattr(student_outputs, 'mean_emphasize_acc', None) is not None:
+            self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
+            self.observation_token_acc_step += 1
+        
+        align_vision_latent_loss = student_outputs.loss_dict['align_vision_latent_projector']
+        loss = student_ce_loss + self.args.align_vision_latent_loss_weight * align_vision_latent_loss
+        outputs_student_loss = student_ce_loss.item()
+
+        # Periodic light GC on main process
+        del student_outputs, teacher_outputs
+        step = int(getattr(self.state, 'global_step', 0) or 0)
+        if self.is_main_process and step > 0 and (step % 20 == 0):
+            try:
+                gc.collect()
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        # Logging
+        self._stu_ce_cum += outputs_student_loss
+        self._stu_ce_steps += 1
+        self.align_vision_latent_loss_cum += align_vision_latent_loss.item()
+        self.align_vision_latent_loss_steps += 1
+
+        return (loss, None) if return_outputs else loss
+    
+    def log(self, logs: dict, start_time: float | None = None):
+        # Merge our rolling averages into the standard logs once per logging call
+        merged = dict(logs)
+        if self.align_vision_latent_loss_steps and self.align_vision_latent_loss_steps > 0:
+            merged['align_vision_latent_loss_pooling'] = round(self.align_vision_latent_loss_cum / max(1, self.align_vision_latent_loss_steps), 8)
+            self.align_vision_latent_loss_cum = 0.0
+            self.align_vision_latent_loss_steps = 0
+        if self._stu_ce_steps > 0:
+            merged["student_ce_loss"] = round(self._stu_ce_cum / max(1, self._stu_ce_steps), 6)
+            self._stu_ce_cum = 0.0
+            self._stu_ce_steps = 0
+        if self.observation_token_acc_step > 0:
+            merged["observation_token_acc"] = round(self.observation_token_acc/ max(1, self.observation_token_acc_step), 6)
+            self.observation_token_acc = 0.
+            self.observation_token_acc_step = 0
+
+        # Call parent to keep default behavior (console/TB/W&B/etc.)
+        return super().log(merged, start_time)
+
+
 
 import weakref
 
