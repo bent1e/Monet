@@ -777,6 +777,10 @@ elif args.stage == 'avt_v2_stage2':
 elif args.stage == 'avt_v3':
     CustomTrainer = CustomTrainerAVT_V3
     collate_fn = partial(collate_fn_avt_v3)
+elif args.stage == 'avt_v3_1':
+    CustomTrainer = CustomTrainerAVT_V3_1
+    collate_fn = partial(collate_fn_avt_v3)
+
 
 if args.deepspeed != "":
     print(f"Note: DeepSpeed is enabled. Using the deepspeed config in {args.deepspeed} (the bsz per device and gradient_accumulation_steps will be adopted from the deepspeed config)")
@@ -789,7 +793,7 @@ elif args.stage == 'avt_sft':
     gradient_checkpointing = True
 elif args.stage == 'avt_stage1':
     gradient_checkpointing = True
-elif args.stage == 'avt_v3':
+elif args.stage in ['avt_v3', 'avt_v3_1']:
     gradient_checkpointing = True
 
 training_args = SFTConfig(
@@ -851,7 +855,7 @@ elif args.stage == 'avt_v2_stage2':
     _tld = args.teacher_latent_dir if getattr(args, 'teacher_latent_dir', None) else _os.path.join(save_dir, 'teacher_latents')
     setattr(training_args, 'teacher_latent_dir', _tld)
 
-elif args.stage == 'avt_v3':
+elif args.stage in ['avt_v3', 'avt_v3_1']:
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
     setattr(training_args, 'alignment_weight', args.alignment_weight)
     setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})

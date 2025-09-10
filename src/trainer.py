@@ -1139,7 +1139,6 @@ class CustomTrainerAVT_V3(SFTTrainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         # Prepare teacher forward inputs (for latent extraction)
-        inputs['stage'] = 'avt_v3'
         inputs['latent_mode'] = False
         inputs['input_ids'] = inputs['teacher_input_ids']
         inputs['attention_mask'] = inputs['teacher_attention_mask']
@@ -1214,6 +1213,179 @@ class CustomTrainerAVT_V3(SFTTrainer):
 
         return (loss, None) if return_outputs else loss
     
+
+
+    def log(self, logs: dict, start_time: float | None = None):
+        # Merge our rolling averages into the standard logs once per logging call
+        merged = dict(logs)
+        if self.align_vision_latent_loss_steps and self.align_vision_latent_loss_steps > 0:
+            merged[f'align_vision_latent_loss_{self.align_loss_type}'] = round(self.align_vision_latent_loss_cum / max(1, self.align_vision_latent_loss_steps), 8)
+            self.align_vision_latent_loss_cum = 0.0
+            self.align_vision_latent_loss_steps = 0
+        if self._stu_ce_steps > 0:
+            merged["student_ce_loss"] = round(self._stu_ce_cum / max(1, self._stu_ce_steps), 6)
+            self._stu_ce_cum = 0.0
+            self._stu_ce_steps = 0
+        if self.observation_token_acc_step > 0:
+            merged["observation_token_acc"] = round(self.observation_token_acc/ max(1, self.observation_token_acc_step), 6)
+            self.observation_token_acc = 0.
+            self.observation_token_acc_step = 0
+
+        # Call parent to keep default behavior (console/TB/W&B/etc.)
+        return super().log(merged, start_time)
+
+
+class CustomTrainerAVT_V3_1(SFTTrainer):
+    def __init__(self, *args, **kwargs): 
+        self.exp_name =kwargs.pop('exp_name')
+        super().__init__(*args, **kwargs)
+        self.weight = self.args.alignment_weight
+        self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
+        # Where to read precomputed teacher latents
+        base_save = getattr(self.args, 'output_dir', './checkpoints')
+        self.teacher_latent_dir = getattr(self.args, 'teacher_latent_dir', None)
+        if not self.teacher_latent_dir:
+            # fall back to user-specified save_model_path-like; use output_dir parent by default
+            self.teacher_latent_dir = os.path.join(base_save if base_save else './checkpoints', 'teacher_latents')
+        # 仅 rank‑0 进程写文件，防止多卡重复
+        self.is_main_process = (
+            not torch.distributed.is_initialized()
+            or torch.distributed.get_rank() == 0
+        )
+        self.align_loss_type = "pooling" if self.args.use_align_vision_latent_loss_pooling else "projector"
+        self.observation_token_acc = 0.
+        self.observation_token_acc_step = 0
+        self.align_vision_latent_loss_cum = 0.
+        self.align_vision_latent_loss_steps = 0
+        self._stu_ce_cum = 0.0        # cumulative student CE loss
+        self._stu_ce_steps = 0
+
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        # -----------------------------
+        # 1) Teacher forward (no-grad)
+        # -----------------------------
+        inputs['latent_mode'] = False
+        inputs['input_ids'] = inputs['teacher_input_ids']
+        inputs['attention_mask'] = inputs['teacher_attention_mask']
+        inputs['pixel_values'] = inputs['teacher_pixel_values']
+        inputs['image_grid_thw'] = inputs['teacher_image_grid_thw']
+        inputs['labels'] = None
+        inputs['alignment_poss'] = inputs['teacher_alignment_poss']
+        model.gradient_checkpointing_disable()
+        inputs['latent_size'] = self.args.latent_size
+        inputs['loss_type'] = [f'align_vision_latent_{self.align_loss_type}']
+        inputs['segs'] = inputs['teacher_segs']
+        inputs['output_helper_img_embeds'] = True
+        with torch.no_grad():
+            teacher_outputs = model(**inputs)
+
+        # -----------------------------
+        # 2) Student latent forward
+        # -----------------------------
+        inputs['latent_mode'] = True
+        inputs['input_ids'] = inputs['student_input_ids']
+        inputs['attention_mask'] = inputs['student_attention_mask']
+        inputs['pixel_values'] = inputs['student_pixel_values']
+        inputs['image_grid_thw'] = inputs['student_image_grid_thw']
+        if 'labels' in inputs:
+            inputs.pop('labels')
+        model.gradient_checkpointing_disable()
+        inputs['output_latent_embeds'] = False
+        inputs['output_helper_img_embeds'] = False
+        inputs['segs'] = None
+        inputs['loss_type'] = []
+        student_outputs_latent = model(**inputs)
+
+        # Make sure ce_patch_vec requires grad and is the SAME tensor used below
+        # (Usually it already requires grad; retain_grad() is useful for debugging.)
+        for v in student_outputs_latent.ce_patch_vec:
+                if hasattr(v, "retain_grad"):
+                    v.retain_grad()
+        # -----------------------------
+        # 3) Student CE forward (for building L3 only)
+        # -----------------------------
+        inputs['latent_mode'] = False
+        inputs['labels'] = inputs['student_labels']
+        inputs['align_vision_latent_pre_result'] = teacher_outputs.align_vision_latent_pre_result
+        inputs['ce_patch_pos'] = student_outputs_latent.ce_patch_pos
+        inputs['ce_patch_vec'] = student_outputs_latent.ce_patch_vec
+        inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
+        inputs['ce_emphasize_poss'] = inputs['observation_poss']
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        inputs['loss_type'] = ['ce']
+        inputs['loss_type'].append(f'align_vision_latent_{self.align_loss_type}')
+        inputs['compute_emphasize_acc'] = True
+        if 'student_attention_mask_4d' in inputs:
+            inputs['attention_mask_4d'] = inputs.pop('student_attention_mask_4d')
+
+        # Call the parent to get the CE/align losses computed by the model (3rd forward)
+        student_ce_loss, student_outputs = super().compute_loss(
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        )
+        if getattr(student_outputs, 'mean_emphasize_acc', None) is not None:
+            self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
+            self.observation_token_acc_step += 1
+
+        align_vision_latent_loss = student_outputs.loss_dict[f'align_vision_latent_{self.align_loss_type}']
+
+        # === (A) Build the conceptual loss L3 on the 3rd forward graph ===
+        L3 = student_ce_loss + self.args.align_vision_latent_loss_weight * align_vision_latent_loss
+
+        # === (B) Take grads of L3 w.r.t. ce_patch_vec ONLY ===
+        # This collects dL3/d(ce_patch_vec) without accumulating parameter grads from the 3rd forward.
+        def _flatten_tensors(x):
+            # Flatten nested [list/tuple of Tensors] into a flat list of Tensors
+            if isinstance(x, (list, tuple)):
+                out = []
+                for y in x:
+                    out.extend(_flatten_tensors(y))
+                return out
+            return [x]
+
+        ce_vec_list = _flatten_tensors(student_outputs_latent.ce_patch_vec)
+        grads = torch.autograd.grad(
+            outputs=L3,
+            inputs=ce_vec_list,
+            retain_graph=False,   # we won't reuse the 3rd graph
+            create_graph=False,   # stop higher-order graph
+            allow_unused=True     # in case some ce vectors are not used
+        )
+
+        # Replace None with zeros for unused elements
+        safe_grads = []
+        for v, g in zip(ce_vec_list, grads):
+            if g is None:
+                # Create a zero tensor on the same device/dtype/shape
+                g = torch.zeros_like(v)
+            safe_grads.append(g.detach())  # detach to stop any 3rd-forward param path
+
+        # === (C) Build a proxy loss that only depends on ce_patch_vec (2nd forward graph) ===
+        # grad(x^T g) = g, so backprop on this proxy loss will push exactly safe_grads into ce_patch_vec,
+        # and then flow back ONLY through the 2nd forward graph/parameters.
+        proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
+
+        # ---------- Logging (keep your original meters) ----------
+        outputs_student_loss = student_ce_loss.item()
+        self._stu_ce_cum += outputs_student_loss
+        self._stu_ce_steps += 1
+        self.align_vision_latent_loss_cum += align_vision_latent_loss.item()
+        self.align_vision_latent_loss_steps += 1
+
+        # Periodic light GC on main process
+        del student_outputs, teacher_outputs
+        step = int(getattr(self.state, 'global_step', 0) or 0)
+        if self.is_main_process and step > 0 and (step % 20 == 0):
+            try:
+                gc.collect()
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        # === Return ONLY the proxy loss ===
+        return (proxy_loss, None) if return_outputs else proxy_loss
+
+
     def log(self, logs: dict, start_time: float | None = None):
         # Merge our rolling averages into the standard logs once per logging call
         merged = dict(logs)
