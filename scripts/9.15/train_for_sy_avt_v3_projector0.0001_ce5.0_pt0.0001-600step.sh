@@ -33,6 +33,7 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --wandb_name ${SAVE_CKPT} \
   --latent_size ${LATENT_SIZE} \
   --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
-  --align_vision_latent_loss_weight ${ALIGN_VISION_LATENT_LOSS_WEIGHT}
+  --align_vision_latent_loss_weight ${ALIGN_VISION_LATENT_LOSS_WEIGHT} \
+  --resume_from_checkpoint
 
   
