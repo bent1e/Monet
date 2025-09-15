@@ -700,7 +700,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
         batch["observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx, latent_end_idx])
 
     return batch
 
