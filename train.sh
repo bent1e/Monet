@@ -343,6 +343,7 @@ export TOKENIZERS_PARALLELISM=false
 LATENT_SIZE=24
 CE_EMPHASIZE_FACTOR=5.0
 ALIGN_VISION_LATENT_LOSS_WEIGHT=0.0001
+EMPHASIZE_LATENT_WEIGHT=2.0
 LOAD_CKPT=Qwen2.5-VL-7B-Instruct
 SAVE_CKPT=9.9_ablation_avt_v3_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align-wt${ALIGN_VISION_LATENT_LOSS_WEIGHT}
 torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
@@ -358,12 +359,12 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     --log_file "./log.txt" \
     --load_model_path /home/dids/shiyang/checkpoints/${LOAD_CKPT} \
     --save_model_path "/home/dids/shiyang/checkpoints/avt_v3/${SAVE_CKPT}" \
-    --wandb_name ${SAVE_CKPT} \
     --deepspeed ./deepspeed/ds_zero2_gpu.json \
     --latent_size ${LATENT_SIZE} \
     --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
     --align_vision_latent_loss_weight ${ALIGN_VISION_LATENT_LOSS_WEIGHT} \
-    --use_align_vision_latent_loss_pooling
+    --use_align_vision_latent_loss_projector \
+    --emphasize_latent_weight ${EMPHASIZE_LATENT_WEIGHT}
     
 
 proxy_on

@@ -518,7 +518,6 @@ def collate_fn_avt_v2_stage1(examples):
         print(f"collate time {time_1 - start_time}")'''
     return batch
 
-
 def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
     # Support wrapped examples providing sample_id
     batch = {}
@@ -806,8 +805,8 @@ training_args = SFTConfig(
     weight_decay=0.01,
     logging_steps=1,
     save_strategy="steps",
-    save_steps=300,
-    save_total_limit=5,
+    save_steps=100,
+    save_total_limit=15,
     optim="adamw_torch_fused",
     bf16=True,
     push_to_hub=False,
