@@ -748,7 +748,30 @@ def resize_by_token_budget_sample_wise(images_per_sample,
 
     return processed_per_sample, sizes_per_sample
 
-
+def resize_diff(images, 
+                question_img_max_pixels=2000*28*28, 
+                remain_global_max_pixels=800*3*28*28,
+                remain_per_img_max_pixels=1280*28*28,
+                divisor=28):
+    processed = []
+    new_sizes = []
+    question_img_processed, question_img_new_sizes = resize_by_token_budget(
+        [images[0]], 
+        global_max_pixels=question_img_max_pixels, 
+        per_img_max_pixels=question_img_max_pixels,
+        divisor=divisor
+    )
+    processed.append(question_img_processed[0])
+    new_sizes.append(question_img_new_sizes[0])
+    remain_img_processed, remain_img_new_sizes = resize_by_token_budget(
+        images[1:], 
+        global_max_pixels=remain_global_max_pixels, 
+        per_img_max_pixels=remain_per_img_max_pixels,
+        divisor=divisor
+    )
+    processed.extend(remain_img_processed)
+    new_sizes.extend(remain_img_new_sizes)
+    return processed, new_sizes
 
 if __name__=="__main__":
     

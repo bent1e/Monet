@@ -624,7 +624,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
     # teacher
     ################################################
     image_inputs, _ = process_vision_info(examples)
-    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+    image_inputs, new_sizes = resize_diff(image_inputs) # resize_by_token_budget(image_inputs)
     teacher_texts = texts
     teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
     total_image_pads = 0
