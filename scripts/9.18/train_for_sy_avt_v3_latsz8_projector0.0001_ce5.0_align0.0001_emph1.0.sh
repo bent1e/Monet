@@ -13,7 +13,7 @@ conda activate mirage
 cd /mmu_vcg_ssd/shiyang06/Project/Latent_Think/abstract-visual-token
 export TOKENIZERS_PARALLELISM=false
 torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
-  --epochs 5 \
+  --epochs 3 \
   --bsz 1 \
   --grad_accum_steps 16 \
   --task "mm-reasoning" \
@@ -35,5 +35,4 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --use_align_vision_latent_loss_projector \
   --align_vision_latent_loss_weight ${ALIGN_VISION_LATENT_LOSS_WEIGHT} \
   --emphasize_latent_weight ${EMPHASIZE_LATENT_WEIGHT}
-
   

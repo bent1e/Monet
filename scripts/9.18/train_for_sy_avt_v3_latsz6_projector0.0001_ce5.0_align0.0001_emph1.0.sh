@@ -3,17 +3,17 @@ export NCCL_IB_DISABLE=0
 export NCCL_IB_GID_INDEX=3
 export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_9
 
-LATENT_SIZE=16
+LATENT_SIZE=6
 CE_EMPHASIZE_FACTOR=5.0
 ALIGN_VISION_LATENT_LOSS_WEIGHT=0.0001
 EMPHASIZE_LATENT_WEIGHT=1.0
-SAVE_CKPT=9.15_ablation_avt_v3_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align-wt${ALIGN_VISION_LATENT_LOSS_WEIGHT}_emph-wt${EMPHASIZE_LATENT_WEIGHT}
+SAVE_CKPT=9.18_ablation_avt_v3_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align-wt${ALIGN_VISION_LATENT_LOSS_WEIGHT}_emph-wt${EMPHASIZE_LATENT_WEIGHT}
 source /pfs/wangzihao11/miniconda3/bin/activate
 conda activate mirage
 cd /mmu_vcg_ssd/shiyang06/Project/Latent_Think/abstract-visual-token
 export TOKENIZERS_PARALLELISM=false
 torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
-  --epochs 3 \
+  --epochs 8 \
   --bsz 1 \
   --grad_accum_steps 16 \
   --task "mm-reasoning" \
