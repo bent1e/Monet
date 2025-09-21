@@ -2641,7 +2641,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                         mean_emphasize_acc /= has_obs_cnt
 
         if 'alignment' in loss_type:
-            loss_dict['alignment'] = loss
+            loss_dict['alignment'] = outputs.alignment_loss
 
             # Compute auxiliary emphasize_latent_attn loss using cached attention if requested
         if _need_emph:

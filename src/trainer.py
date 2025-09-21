@@ -1437,7 +1437,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
     def __init__(self, *args, **kwargs): 
         self.exp_name =kwargs.pop('exp_name')
         super().__init__(*args, **kwargs)
-        self.weight = self.args.alignment_weight
+        self.alignment_weight = self.args.alignment_weight
         self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
         # Where to read precomputed teacher latents
         base_save = getattr(self.args, 'output_dir', './checkpoints')
@@ -1531,8 +1531,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
         if getattr(student_outputs, 'mean_emphasize_acc', None) is not None:
             self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
             self.observation_token_acc_step += 1
-        
-        original_loss = student_ce_loss + self.args.alignment_weight * alignment_loss
+
         outputs_student_loss = student_ce_loss.item()
 
         if self.args.emphasize_latent_weight != 1.0:
@@ -1547,7 +1546,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
 
             ce_vec_list = _flatten_tensors(student_outputs_latent.ce_patch_vec)
             grads = torch.autograd.grad(
-                outputs=alignment_loss,
+                outputs=self.alignment_weight *alignment_loss,
                 inputs=ce_vec_list,
                 retain_graph=True,   # we won't reuse the 3rd graph
                 create_graph=False,   # stop higher-order graph
@@ -1563,9 +1562,9 @@ class CustomTrainerAVT_V4(SFTTrainer):
                 safe_grads.append(g.detach())  # detach to stop any 3rd-forward param path
 
             proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
-            loss = self.args.emphasize_latent_weight * proxy_loss + 1.0 * original_loss
+            loss = self.args.emphasize_latent_weight * proxy_loss + 1.0 * student_ce_loss
         else:
-            loss = original_loss
+            loss = student_ce_loss + self.alignment_weight * alignment_loss
 
 
         # Periodic light GC on main process
@@ -1596,7 +1595,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
             self._stu_ce_cum = 0.0
             self._stu_ce_steps = 0
         if self.alignment_loss_steps > 0:
-            merged[f'alignment_loss'] = round(self.alignment_loss_cum / max(1, self.alignment_loss_steps), 8)
+            merged[f'alignment_loss'] = round(self.alignment_loss_cum / max(1, self.alignment_loss_steps), 6)
             self.alignment_loss_cum = 0.0
             self.alignment_loss_steps = 0
         if self.observation_token_acc_step > 0:
