@@ -1,6 +1,6 @@
-import os as _early_os
+import os
 # Disable parallelism in HuggingFace tokenizers to avoid fork-related warnings/deadlocks
-_early_os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import shutil
 from functools import partial
 import torch
@@ -166,6 +166,21 @@ model.config.answer_start_pattern = answer_start_pattern.tolist()
 
 for param in model.visual.parameters():
     param.requires_grad = False
+
+
+# If training avt_v4 with --no_ce, freeze token input embeddings and lm_head so only alignment-related parts learn
+if args.stage == 'avt_v4' and getattr(args, 'no_ce', False):
+    try:
+        _emb = model.get_input_embeddings()
+        _emb_params = sum(p.numel() for p in _emb.parameters()) if _emb is not None else 0
+        for p in _emb.parameters():
+            p.requires_grad = False
+        _lm_params = sum(p.numel() for p in model.lm_head.parameters()) if hasattr(model, 'lm_head') else 0
+        for p in model.lm_head.parameters():
+            p.requires_grad = False
+        logging.info(f"[freeze] avt_v4 + no_ce=True -> froze input_embeddings ({_emb_params} params) and lm_head ({_lm_params} params)")
+    except Exception as _e:
+        logging.warning(f"[freeze] Failed to freeze input embeddings / lm_head under avt_v4+no_ce: {_e}")
 
 
 def collate_fn_stage1(examples):
@@ -501,7 +516,7 @@ def collate_fn_avt_v2_stage1(examples):
         batch["labels"] = generate_labels_after_multi_token_start_only_allow(batch["input_ids"], answer_start_pattern, allowed_poss=batch["observation_poss"])
     else:
         batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, 
-        latent_pad_idx, img_pad_idx,  img_start_idx, img_end_idx, observation_start_idx, observation_end_idx])
+        latent_pad_idx, img_pad_idx, img_start_idx, img_end_idx, observation_start_idx, observation_end_idx])
     '''if _rank==0:
         time_1 = time()
         print(f"collate time {time_1 - start_time}")'''
@@ -594,7 +609,7 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
         batch["observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[img_pad_idx, img_start_idx, img_end_idx, end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
 
     return batch
 
@@ -614,7 +629,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
     ################################################
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
-        image_inputs, new_sizes = resize_by_token_budget(image_inputs, args.image_token_budget)
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs)
     elif args.image_resize == "clear_question":
         image_inputs, new_sizes = resize_diff(image_inputs) # resize_by_token_budget(image_inputs)
     teacher_texts = texts
@@ -703,7 +718,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
         batch["observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx, latent_end_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[img_pad_idx, img_start_idx, img_end_idx, end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx, latent_end_idx])
 
     return batch
 
@@ -812,7 +827,7 @@ def collate_fn_avt_v4(examples, alignment="boxed_start"):
         batch["student_observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx, latent_end_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[img_pad_idx, img_start_idx, img_end_idx, end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx, latent_end_idx])
 
     return batch
 
@@ -915,8 +930,8 @@ training_args = SFTConfig(
     weight_decay=0.01,
     logging_steps=1,
     save_strategy="steps",
-    save_steps=15,
-    save_total_limit=15,
+    save_steps=50,
+    save_total_limit=10,
     optim="adamw_torch_fused",
     bf16=True,
     push_to_hub=False,
@@ -957,16 +972,16 @@ elif args.stage == 'avt_v2_stage1':
     setattr(training_args, 'use_align_vision_latent_loss_pooling', args.use_align_vision_latent_loss_pooling)
     setattr(training_args, 'align_vision_latent_loss_weight', args.align_vision_latent_loss_weight)
     setattr(training_args, 'latent_size', args.latent_size)
+    setattr(training_args, 'emphasize_latent_weight', args.emphasize_latent_weight)
     
 elif args.stage == 'avt_v2_stage2':
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
     setattr(training_args, 'alignment_weight', args.alignment_weight)
     setattr(training_args, 'gradient_checkpointing_kwargs', {"use_reentrant": False})
     setattr(training_args, 'alignment_layer', args.alignment_layer)
-    # Propagate teacher_latent_dir so trainer can load cached latents
-    import os as _os
-    _tld = args.teacher_latent_dir if getattr(args, 'teacher_latent_dir', None) else _os.path.join(save_dir, 'teacher_latents')
+    _tld = args.teacher_latent_dir if getattr(args, 'teacher_latent_dir', None) else os.path.join(save_dir, 'teacher_latents')
     setattr(training_args, 'teacher_latent_dir', _tld)
+
 
 elif args.stage in ['avt_v3', 'avt_v3_1']:
     setattr(training_args, 'ce_emphasize_factor', args.ce_emphasize_factor)
@@ -986,6 +1001,7 @@ elif args.stage in ['avt_v4']:
     setattr(training_args, 'latent_size', args.latent_size)
     setattr(training_args, 'emphasize_latent_weight', args.emphasize_latent_weight)
     setattr(training_args, 'teacher_reps_dir', args.teacher_reps_dir)
+    setattr(training_args, 'no_ce', args.no_ce)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(

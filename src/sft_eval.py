@@ -166,7 +166,7 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
     batch["student_input_ids"] = student_batch["input_ids"]
     batch["student_attention_mask"] = student_batch["attention_mask"]
 
-    batch["attention_mask_4d"] = {"full_attention": build_additive_bias_wo_helper_images(
+    batch["attention_mask_4d"] = {"full_attention": build_4d_attn(
         input_ids=batch["student_input_ids"],
         pad_mask=batch["student_attention_mask"],
         token_ids=SPECIAL_id,
@@ -194,6 +194,84 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
 
     return batch
 
+def collate_fn_w_or_wo_helper_img(examples, alignment="boxed_start"):
+    # Support wrapped examples providing sample_id
+    batch = {}
+    batch['metadata'] = [ex['metadata'] for ex in examples]
+    examples = [ex['data'] for ex in examples]
+    batch_assistant_img_cnts = [sum(1 for step in examples[i][2]['content'] if step["type"] == "image") for i in range(len(examples))]
+    texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
+
+    # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
+    texts = [place_output_image_avt(text) for text in texts]
+    
+    ################################################
+    # w helper img
+    ################################################
+    image_inputs, _ = process_vision_info(examples)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+    teacher_texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
+    teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
+    total_image_pads = 0
+    for txt in texts:
+        total_image_pads += txt.count("<|image_pad|>")
+    assert total_image_pads == len(image_inputs)
+    batch['teacher_pixel_values'] = teacher_batch['pixel_values']
+    batch['teacher_image_grid_thw'] = teacher_batch['image_grid_thw']
+    batch['teacher_input_ids'] = teacher_batch['input_ids']
+    batch['teacher_attention_mask'] = teacher_batch['attention_mask']
+    
+    ################################################
+    # wo helper img
+    ################################################
+    # replace <|vision_start|><|image_pad|><|vision_end|> with <abs_vis_token><abs_vis_token_pad>...</abs_vis_token> for each <|im_start|>assistant content
+    student_texts = remove_helper_images(texts, args.latent_size, "<abs_vis_token_pad>")
+    user_examples = remove_assistant_images(examples)
+    user_image_inputs, _ = process_vision_info(user_examples)
+    resize_ptr = 0
+    if new_sizes is not None:
+        for i, img in enumerate(user_image_inputs):
+            img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)
+            user_image_inputs[i] = img
+            resize_ptr += batch_assistant_img_cnts[i] + 1 # user_image_inputs only contain question images of each batch sample, so we need to skip the helper images in the new_sizes by adding batch_assistant_img_cnts[i]
+    student_batch = processor(text=student_texts, images=user_image_inputs, return_tensors="pt", padding=True)
+    total_image_pads = 0
+    for txt in student_texts:
+        total_image_pads += txt.count("<|image_pad|>")
+    assert total_image_pads == len(user_image_inputs)
+    batch['student_pixel_values'] = student_batch['pixel_values']
+    batch['student_image_grid_thw'] = student_batch['image_grid_thw']
+    batch["student_input_ids"] = student_batch["input_ids"]
+    batch["student_attention_mask"] = student_batch["attention_mask"]
+
+    observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
+    batch["teacher_observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start, end)))
+        batch["teacher_observation_poss"].append(poss_of_a_sample)
+
+    observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
+    observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
+    batch["student_observation_poss"] = []
+    assert len(observation_start_poss) == len(observation_end_poss)
+    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+        poss_of_a_sample = []
+        if len(start_poss) > 0 and len(end_poss) > 0:
+            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+            for start, end in zip(start_poss, end_poss):
+                poss_of_a_sample.extend(list(range(start, end)))
+        batch["student_observation_poss"].append(poss_of_a_sample)
+
+
+    return batch
+
+
 def main():
 
     # ---- token-level error logging config ----
@@ -219,8 +297,6 @@ def main():
 
     device = _device()
     model.to(device)
-
-
 
     # Iterate data and precompute
     bs = max(1, int(getattr(args, 'bsz', 1)))

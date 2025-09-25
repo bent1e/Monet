@@ -61,7 +61,7 @@ def _prepare_single_sample_for_batch(
                 img_file_name = content.pop("image_file_name")
                 if "kling_mm" in dataset_root:
                     img_file_name = img_file_name.replace("created_dataset/filtered_data/", "")
-                content["image_file_name"] = os.path.join(dataset_root, img_file_name)
+                content["image"] = img_file_name
                 if j > 0 and new_step["content"][j - 1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j - 1]["text"]:
                         return None  # invalid per your rule
@@ -201,16 +201,11 @@ Example usages:
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
 python remove_too_long.py \
-    --max_seq_len 2048 \
+    --max_seq_len 3000 \
     --bsz 128 \
     --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
     --data_path \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata_9.1.json" \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_from_stage1_9.1.json" \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_geometry/filtered_train_w_metadata_9.1.json" \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000_w_metadata_9.1.json"
+    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json"
 
 # Another env
 source /pfs/wangzihao11/miniconda3/bin/activate

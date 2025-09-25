@@ -235,12 +235,11 @@ Example usages (GPU):
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
 python remove_too_long_gpu.py \
-    --max_seq_len 2048 \
+    --max_seq_len 4096 \
     --bsz 128 \
-    --device cuda:0 \
     --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
     --data_path \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_from_stage1_9.1.json"
+    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json"
 
 # Another env with GPU
 source /pfs/wangzihao11/miniconda3/bin/activate

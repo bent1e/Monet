@@ -2623,22 +2623,23 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                 loss_dict['ce'] = loss
 
             has_obs_cnt = 0
-            if compute_emphasize_acc:
-                # Compute emphasize accuracy
-                with torch.no_grad():
-                    mean_emphasize_acc = 0
-                    for b in range(labels.shape[0]):
-                        if not ce_emphasize_poss[b]:
-                            continue
-                        has_obs_cnt += 1
-                        poss = torch.tensor(ce_emphasize_poss[b], device=labels.device, dtype=torch.long)
-                        preds = logits[b].argmax(dim=-1)[poss-1][:]
-                        emphasize_labels = labels[b][poss][:]
-                        correct = (preds == emphasize_labels).float()
-                        emphasize_acc = correct.sum() / max(1, poss.shape[0])
-                        mean_emphasize_acc += emphasize_acc.item()
-                    if mean_emphasize_acc>0:
-                        mean_emphasize_acc /= has_obs_cnt
+        
+        if compute_emphasize_acc:
+            # Compute emphasize accuracy
+            with torch.no_grad():
+                mean_emphasize_acc = 0
+                for b in range(labels.shape[0]):
+                    if not ce_emphasize_poss[b]:
+                        continue
+                    has_obs_cnt += 1
+                    poss = torch.tensor(ce_emphasize_poss[b], device=labels.device, dtype=torch.long)
+                    preds = logits[b].argmax(dim=-1)[poss-1][:]
+                    emphasize_labels = labels[b][poss][:].to(preds.device)
+                    correct = (preds == emphasize_labels).float()
+                    emphasize_acc = correct.sum() / max(1, poss.shape[0])
+                    mean_emphasize_acc += emphasize_acc.item()
+                if mean_emphasize_acc>0:
+                    mean_emphasize_acc /= has_obs_cnt
 
         if 'alignment' in loss_type:
             loss_dict['alignment'] = outputs.alignment_loss

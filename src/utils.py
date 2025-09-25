@@ -20,7 +20,7 @@ def get_args():
     parser.add_argument("--task", type=str, default="vsp-spatial-reasoning", choices=["vsp-spatial-reasoning", "vsp-spatial-planning", "blink-jigsaw", "sat", "mm-reasoning"])
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/',help="Path to save the model checkpoints.")
     parser.add_argument("--resume_from_checkpoint", default=False, action="store_true")
-    parser.add_argument("--dataset_root", type=str, default="./new", help="Root directory for the dataset.")
+    parser.add_argument("--dataset_root", type=str, default="./new/created_dataset/filtered_data", help="Root directory for the dataset.")
     parser.add_argument("--deepspeed", type=str, default="",
                         help="Path to DeepSpeed config JSON, e.g., ./deepspeed/ds_zero2_cpu_offload.json")
     parser.add_argument("--num_samples", default=-1, help="-1 means all data", type=int)
@@ -53,6 +53,9 @@ def get_args():
 
     # ===== AVT v3 =====
     parser.add_argument("--emphasize_latent_weight", default=1.0, type=float, help="Weight of the loss that only flow through latents in avt_v3.")
+
+    # ===== AVT v4 =====
+    parser.add_argument("--no_ce", action='store_true', default=False, help="If true, only use alignment loss to train the model.")
 
     # ===== Training record arguments =====
     parser.add_argument("--log_file", type=str, default='./log.txt')
@@ -237,6 +240,17 @@ def add_abs_vis_token_after_helper_img(texts, latent_size, latent_pad_str="<abs_
         upd_text = turns[0]
         for turn in turns[1:]:
             upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"<|vision_start|><|image_pad|><|vision_end|><abs_vis_token>{latent_pad_strs}</abs_vis_token>")
+        update_texts.append(upd_text)
+    return update_texts
+
+def remove_helper_images(texts, latent_size, latent_pad_str="<abs_vis_token_pad>"):
+    update_texts = []
+    latent_pad_strs = latent_pad_str*latent_size
+    for i, text in enumerate(texts):
+        turns = text.split("<|im_start|>assistant")
+        upd_text = turns[0]
+        for turn in turns[1:]:
+            upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"")
         update_texts.append(upd_text)
     return update_texts
 
@@ -652,8 +666,8 @@ def mask_image_output_tokens(
 
 
 def resize_by_token_budget(images,
-                           global_max_pixels=3000*28*28,
-                           per_img_max_pixels=2000*28*28,
+                           global_max_pixels=2000*28*28,
+                           per_img_max_pixels=1280*28*28,
                            divisor=28):
     """等比缩放，保证一条样本内所有图像像素和 ≤ global_max_pixels"""
     # 1) 统计原总像素
@@ -1052,7 +1066,7 @@ def build_4d_attn(
     observation_tokens_only_see_latent_tokens: bool = False,
     observation_tokens_cannot_see_question_image: bool = False,
     observation_tokens_only_see_question_and_latent: bool = False,
-    latent_can_see_all_previous: bool = False,
+    latent_can_see_all_previous: bool = True,
     mask_question_image: bool = False,
     return_type: str = 'bool'
 ):

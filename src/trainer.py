@@ -10,6 +10,37 @@ from .utils import SFTRepAnalyzer
 import math
 from time import time
 
+def compute_latents_only_loss(latents, loss_for_latents):
+    def _flatten_tensors(x):
+                # Flatten nested [list/tuple of Tensors] into a flat list of Tensors
+                if isinstance(x, (list, tuple)):
+                    out = []
+                    for y in x:
+                        out.extend(_flatten_tensors(y))
+                    return out
+                return [x]
+
+    ce_vec_list = _flatten_tensors(latents)
+    grads = torch.autograd.grad(
+        outputs=loss_for_latents,
+        inputs=ce_vec_list,
+        retain_graph=True,   # we won't reuse the 3rd graph
+        create_graph=False,   # stop higher-order graph
+        allow_unused=True     # in case some ce vectors are not used
+    )
+
+    # Replace None with zeros for unused elements
+    safe_grads = []
+    for v, g in zip(ce_vec_list, grads):
+        if g is None:
+            # Create a zero tensor on the same device/dtype/shape
+            g = torch.zeros_like(v)
+        safe_grads.append(g.detach())  # detach to stop any 3rd-forward param path
+
+    proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
+    return proxy_loss
+
+
 class CustomTrainerStage1(SFTTrainer):
         
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -222,23 +253,6 @@ class CustomTrainerSFT(SFTTrainer):
         # Optional absolute warmup steps takes precedence over ratio
         self._ce_emphasize_warmup_steps: int = int(getattr(self.args, 'ce_emphasize_warmup_steps', 0) or 0)
 
-        # Helper: compute total training steps if needed (may be updated later, so compute on demand as well)
-        def _estimate_total_steps() -> int:
-            # Prefer TrainerState.max_steps if available and > 0
-            try:
-                if hasattr(self.state, 'max_steps') and self.state.max_steps and self.state.max_steps > 0:
-                    return int(self.state.max_steps)
-            except Exception:
-                pass
-            # Fallback to args.max_steps if provided (>0)
-            try:
-                if hasattr(self.args, 'max_steps') and self.args.max_steps and self.args.max_steps > 0:
-                    return int(self.args.max_steps)
-            except Exception:
-                pass
-            return 0
-
-        self._ce_emphasize_total_steps_hint = _estimate_total_steps()
         # Representation analysis
         self.rep_analyzer = None
         args_cfg = self.args
@@ -378,30 +392,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         if 'processing_class' not in kwargs and 'tokenizer' in kwargs:
             kwargs['processing_class'] = kwargs.pop('tokenizer')
         super().__init__(*args, **kwargs)
-        self.weight = 1.0
-        # ce_emphasize_factor warmup configuration
-        # Target factor (backward compatible with existing arg name)
-        self._ce_emphasize_target: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
-        # Optional absolute warmup steps takes precedence over ratio
-        self._ce_emphasize_warmup_steps: int = int(getattr(self.args, 'ce_emphasize_warmup_steps', 0) or 0)
 
-        # Helper: compute total training steps if needed (may be updated later, so compute on demand as well)
-        def _estimate_total_steps() -> int:
-            # Prefer TrainerState.max_steps if available and > 0
-            try:
-                if hasattr(self.state, 'max_steps') and self.state.max_steps and self.state.max_steps > 0:
-                    return int(self.state.max_steps)
-            except Exception:
-                pass
-            # Fallback to args.max_steps if provided (>0)
-            try:
-                if hasattr(self.args, 'max_steps') and self.args.max_steps and self.args.max_steps > 0:
-                    return int(self.args.max_steps)
-            except Exception:
-                pass
-            return 0
-
-        self._ce_emphasize_total_steps_hint = _estimate_total_steps()
         # Representation analysis
         self.rep_analyzer = None
         args_cfg = self.args
@@ -420,7 +411,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
             not torch.distributed.is_initialized()
             or torch.distributed.get_rank() == 0
         )
-
+        self.ce_emphasize_factor = self.args.ce_emphasize_factor
         self.observation_token_acc = 0.
         self.observation_token_acc_step = 0
 
@@ -476,29 +467,6 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         self.align_vision_latent_loss_cum = 0.
         self.align_vision_latent_loss_steps = 0
 
-    def _current_ce_emphasize_factor(self) -> float:
-        """Linear warmup from 1.0 -> target over N steps or ratio of total steps.
-
-        Priority: ce_emphasize_warmup_steps (absolute) > ce_emphasize_warmup_ratio > no warmup.
-        After warmup, clamp to target. If target <= 1.0, return target directly.
-        """
-        target = float(self._ce_emphasize_target)
-        if target == 1.0:
-            return 1.0
-
-        # Decide warmup steps
-        warmup_steps = int(self._ce_emphasize_warmup_steps or 0)
-
-        if warmup_steps <= 0:
-            # No warmup configured or cannot determine steps
-            return target
-
-        # Use current global_step (before increment) for smooth schedule in training loop
-        gs = int(getattr(self.state, 'global_step', 0) or 0)
-        progress = min(1.0, max(0.0, gs / float(max(1, warmup_steps))))
-        return float(1.0 + (target - 1.0) * progress)
-
-
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute training loss and additionally compute token accuracies
@@ -508,9 +476,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         inputs['loss_type'] = []
         #inputs['enable_ce_checkpoint'] = False
         outputs = model(**inputs, return_dict=True, output_hidden_states=False)
-        '''if self.is_main_process:
-            time_1 = time()
-            print(f"latent forward time {time_1 - start_time}")'''
+
         # Separate, no_grad forward for attention analysis (interval-gated) BEFORE enabling grad checkpointing
         # This ensures no state toggles between training forward and backward.
         if getattr(self.args, 'attn_analysis', False):
@@ -745,25 +711,15 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
                 model.config.use_cache = False
         except Exception:
             pass
+        
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        #inputs['enable_ce_checkpoint'] = True
-
-        # test
-        '''alpha = torch.tensor(1.0, device=outputs.ce_patch_vec[0][0].device, requires_grad=True)
-        scaled = []
-        for row in outputs.ce_patch_vec:
-            row.retain_grad()
-            sv = alpha * row       # connects pass-2 loss to pass-1 via 'row'
-            sv.retain_grad()       # non-leaf; keep its grad so we can inspect
-            scaled.append(sv)  # use detach() to isolate only this path'''
-
 
         inputs['latent_mode'] = False
         inputs['ce_patch_pos'] = outputs.ce_patch_pos
         inputs['ce_patch_vec'] = outputs.ce_patch_vec
         inputs['ce_emphasize_poss'] = inputs['observation_poss']
         # Dynamic warmup factor passed to model.forward
-        inputs['ce_emphasize_factor'] = self._current_ce_emphasize_factor()
+        inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
         inputs['loss_type'] = ['ce']
         
         # Decide whether to also compute emphasize_latent_attn in same forward
@@ -828,6 +784,9 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
             self.align_vision_latent_loss_cum += align_vision_latent_loss.item()
             self.align_vision_latent_loss_steps += 1
 
+        latent_only_loss = compute_latents_only_loss(outputs.ce_patch_vec, total_loss)
+        total_loss = latent_only_loss * self.args.emphasize_latent_weight + total_loss
+
         # For return_outputs == True, we must return our combined loss
         if return_outputs:
             return (total_loss, None)
@@ -842,19 +801,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
                 torch.cuda.empty_cache()
             except Exception:
                 pass
-        
-        '''# test
-        total_loss.backward()
-        # A) Does CE depend on the injected branch?
-        print("dL/dalpha:", float(alpha.grad.detach().cpu()))
 
-        # B) Did gradients flow back to the ORIGINAL pass-1 vectors?
-        row_norms = [None if r.grad is None else float(r.grad.norm().cpu()) for r in outputs.ce_patch_vec]
-        print("||grad on pass-1 rows||:", row_norms)
-
-        # C) Do the injected tensors themselves carry gradients?
-        sv_norms = [None if s.grad is None else float(s.grad.norm().cpu()) for s in scaled]
-        print("||grad on injected scaled vecs||:", sv_norms)'''
         return total_loss
 
 
@@ -1192,34 +1139,8 @@ class CustomTrainerAVT_V3(SFTTrainer):
         outputs_student_loss = student_ce_loss.item()
 
         if self.args.emphasize_latent_weight != 1.0:
-            def _flatten_tensors(x):
-                # Flatten nested [list/tuple of Tensors] into a flat list of Tensors
-                if isinstance(x, (list, tuple)):
-                    out = []
-                    for y in x:
-                        out.extend(_flatten_tensors(y))
-                    return out
-                return [x]
-
-            ce_vec_list = _flatten_tensors(student_outputs_latent.ce_patch_vec)
-            grads = torch.autograd.grad(
-                outputs=original_loss,
-                inputs=ce_vec_list,
-                retain_graph=True,   # we won't reuse the 3rd graph
-                create_graph=False,   # stop higher-order graph
-                allow_unused=True     # in case some ce vectors are not used
-            )
-
-            # Replace None with zeros for unused elements
-            safe_grads = []
-            for v, g in zip(ce_vec_list, grads):
-                if g is None:
-                    # Create a zero tensor on the same device/dtype/shape
-                    g = torch.zeros_like(v)
-                safe_grads.append(g.detach())  # detach to stop any 3rd-forward param path
-
-            proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
-            loss = self.args.emphasize_latent_weight * proxy_loss + 1.0 * original_loss
+            latent_only_loss = compute_latents_only_loss(student_outputs_latent.ce_patch_vec, original_loss)
+            loss = self.args.emphasize_latent_weight * latent_only_loss + 1.0 * original_loss
         else:
             loss = original_loss
 
@@ -1438,6 +1359,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
         self.exp_name =kwargs.pop('exp_name')
         super().__init__(*args, **kwargs)
         self.alignment_weight = self.args.alignment_weight
+        self.no_ce = self.args.no_ce
         self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
         # Where to read precomputed teacher latents
         base_save = getattr(self.args, 'output_dir', './checkpoints')
@@ -1487,7 +1409,7 @@ class CustomTrainerAVT_V4(SFTTrainer):
                 latents_list = []
                 raise RuntimeError(f"Missing teacher latent file: {path}")
             data = torch.load(path, map_location='cpu')
-            latents_list.append(data['latent'])
+            latents_list.append(data['latent'].detach())
         if batch_metadata is not None and len(latents_list) == len(batch_metadata):
             teacher_reps = latents_list
 
@@ -1518,7 +1440,9 @@ class CustomTrainerAVT_V4(SFTTrainer):
         inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
         inputs['ce_emphasize_poss'] = inputs['student_observation_poss']
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        inputs['loss_type'] = ['ce', 'alignment']
+        inputs['loss_type'] = ['alignment']
+        if not self.no_ce:
+            inputs['loss_type'].append('ce')
 
         inputs['compute_emphasize_acc'] = True
         if 'student_attention_mask_4d' in inputs:
@@ -1532,37 +1456,15 @@ class CustomTrainerAVT_V4(SFTTrainer):
             self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
             self.observation_token_acc_step += 1
 
-        outputs_student_loss = student_ce_loss.item()
+        if not self.no_ce:
+            outputs_student_loss = student_ce_loss.item()
+        else:
+            student_ce_loss = 0.0
+            outputs_student_loss = 0.0
 
         if self.args.emphasize_latent_weight != 1.0:
-            def _flatten_tensors(x):
-                # Flatten nested [list/tuple of Tensors] into a flat list of Tensors
-                if isinstance(x, (list, tuple)):
-                    out = []
-                    for y in x:
-                        out.extend(_flatten_tensors(y))
-                    return out
-                return [x]
-
-            ce_vec_list = _flatten_tensors(student_outputs_latent.ce_patch_vec)
-            grads = torch.autograd.grad(
-                outputs=self.alignment_weight *alignment_loss,
-                inputs=ce_vec_list,
-                retain_graph=True,   # we won't reuse the 3rd graph
-                create_graph=False,   # stop higher-order graph
-                allow_unused=True     # in case some ce vectors are not used
-            )
-
-            # Replace None with zeros for unused elements
-            safe_grads = []
-            for v, g in zip(ce_vec_list, grads):
-                if g is None:
-                    # Create a zero tensor on the same device/dtype/shape
-                    g = torch.zeros_like(v)
-                safe_grads.append(g.detach())  # detach to stop any 3rd-forward param path
-
-            proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
-            loss = self.args.emphasize_latent_weight * proxy_loss + 1.0 * student_ce_loss
+            latent_only_loss = compute_latents_only_loss(student_outputs_latent.ce_patch_vec, self.alignment_weight *alignment_loss)
+            loss = self.args.emphasize_latent_weight * latent_only_loss + 1.0 * student_ce_loss
         else:
             loss = student_ce_loss + self.alignment_weight * alignment_loss
 
