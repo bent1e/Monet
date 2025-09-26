@@ -2064,7 +2064,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                     pre_embeds  = seq_embeds[:, :ans_start, :]
                     pre_pos_ids = pos_ids_s[:, :, :ans_start]
                     pre_att_m   = attn_mask_s[:, :ans_start] if attention_mask_4d is None else {
-                        'full_attention': attn_mask_s['full_attention'][:, :, :ans_start, :ans_start].clone()
+                        'full_attention': attn_mask_s['full_attention'][:, :, :ans_start, :ans_start]
                     }
                     pre_out = run_segment_forward(
                         language_model=self.language_model,
@@ -2113,7 +2113,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                                 seg_att_m   = None
                                 if attention_mask_4d is not None:
                                     seg_att_m = {
-                                        'full_attention': attn_mask_s['full_attention'][:, :, q0:q1, :k1].clone()
+                                        'full_attention': attn_mask_s['full_attention'][:, :, q0:q1, :k1]
                                     }
                                 else:
                                     seg_att_m = attn_mask_s[:, :k1]
@@ -2203,17 +2203,17 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         ce_patch_vec[b].append(latent_embed[0, 0])
 
                     step_pos_ids = pos_ids_s[:, :, pos : pos + 1]
-                    if attention_mask_4d is not None:
-                        step_attn_mask = {'full_attention': attn_mask_s['full_attention'][:, :, pos:pos+1, :pos+1].clone()}
+                    '''if attention_mask_4d is not None:
+                        step_attn_mask = {'full_attention': attn_mask_s['full_attention'][:, :, pos:pos+1, :pos+1]}
                     else:
-                        step_attn_mask = attn_mask_s[:, :pos+1]
+                        step_attn_mask = attn_mask_s[:, :pos+1]'''
                     #print("[Latent seg - before forward] ", cache_kv_shapes(past_kv))
 
                     step_out = self.language_model(
                         input_ids=None,
                         inputs_embeds=latent_embed.detach(),# if stage == 'avt_v1_stage1' else latent_embed,
                         position_ids=step_pos_ids,
-                        attention_mask=step_attn_mask,
+                        attention_mask=attention_mask[b: b + 1][:, :pos+1],
                         past_key_values=past_kv,
                         cache_position=torch.tensor([pos], device=device),
                         use_cache=True,

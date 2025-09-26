@@ -9,7 +9,7 @@ export TOKENIZERS_PARALLELISM=false
 LATENT_SIZE=12
 CE_EMPHASIZE_FACTOR=5.0
 ALIGN_VISION_LATENT_LOSS_WEIGHT=0.0001
-EMPHASIZE_LATENT_WEIGHT=1.0
+EMPHASIZE_LATENT_WEIGHT=2.0
 SAVE_CKPT=9.26_tiny_avt_v2_stage1_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align-wt${ALIGN_VISION_LATENT_LOSS_WEIGHT}_emph-wt${EMPHASIZE_LATENT_WEIGHT}
 torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
   --epochs 8 \
@@ -21,6 +21,7 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
   "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1_max_seq_len2500.json" \
   "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" \
   "./new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000_max_seq_len2500.json" \
+  "./new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000_w_metadata_9.1_max_seq_len2048.json" \
   --log_file "./log.txt" \
   --load_model_path /home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct \
   --save_model_path /home/dids/shiyang/checkpoints/avt_v2_stage1/${SAVE_CKPT} \
