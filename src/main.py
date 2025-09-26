@@ -432,7 +432,7 @@ def collate_fn_avt_sft(examples):
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
         image_inputs, new_sizes = resize_by_token_budget(image_inputs)
-    elif args.image_resize == "clear_question":
+    elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs) # resize_by_token_budget(image_inputs)
     teacher_texts = texts
     teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
@@ -476,7 +476,10 @@ def collate_fn_avt_v2_stage1(examples):
     texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
     
     image_inputs, _ = process_vision_info(examples)
-    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+    if args.image_resize == "global":
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+    elif args.image_resize == "clear_question_img":
+        image_inputs, new_sizes = resize_diff(image_inputs)
 
     total_image_pads = 0    
     for txt in texts:
@@ -489,10 +492,10 @@ def collate_fn_avt_v2_stage1(examples):
             input_ids=batch["input_ids"],
             pad_mask=batch["attention_mask"],
             token_ids=SPECIAL_id,
-            not_mask_image=getattr(args, 'not_mask_image', False),
-            mask_latent=getattr(args, 'mask_latent', False),
-            observation_tokens_cannot_see_question_image=getattr(args, 'observation_tokens_cannot_see_question_image', False),
-            observation_tokens_only_see_question_and_latent=getattr(args, 'observation_tokens_only_see_question_and_latent', False),
+            not_mask_image=args.not_mask_image,
+            mask_latent=args.mask_latent,
+            observation_tokens_cannot_see_question_image=args.observation_tokens_cannot_see_question_image,
+            observation_tokens_only_see_question_and_latent=args.observation_tokens_only_see_question_and_latent,
             latent_can_see_all_previous=args.latent_can_see_all_previous,
             return_type='bool',
             mask_question_image=args.mask_question_image
@@ -516,10 +519,8 @@ def collate_fn_avt_v2_stage1(examples):
         batch["labels"] = generate_labels_after_multi_token_start_only_allow(batch["input_ids"], answer_start_pattern, allowed_poss=batch["observation_poss"])
     else:
         batch["labels"] = generate_labels_after_multi_token_start(batch["input_ids"], answer_start_pattern, ignore_ids=[end_pad_token_idx, 
-        latent_pad_idx, img_pad_idx, img_start_idx, img_end_idx, observation_start_idx, observation_end_idx])
-    '''if _rank==0:
-        time_1 = time()
-        print(f"collate time {time_1 - start_time}")'''
+        latent_pad_idx, latent_end_idx, img_pad_idx, img_start_idx, img_end_idx, observation_start_idx, observation_end_idx])
+
     return batch
 
 def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
@@ -630,7 +631,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
         image_inputs, new_sizes = resize_by_token_budget(image_inputs)
-    elif args.image_resize == "clear_question":
+    elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs) # resize_by_token_budget(image_inputs)
     teacher_texts = texts
     teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
@@ -661,7 +662,7 @@ def collate_fn_avt_v3(examples, alignment="boxed_start"):
                 img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)
                 user_image_inputs[i] = img
                 resize_ptr += batch_assistant_img_cnts[i] + 1
-    elif args.image_resize == "clear_question":
+    elif args.image_resize == "clear_question_img":
         for i, img in enumerate(user_image_inputs):
             if new_sizes[resize_ptr] is not None:
                 img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)
@@ -739,7 +740,7 @@ def collate_fn_avt_v4(examples, alignment="boxed_start"):
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
         image_inputs, new_sizes = resize_by_token_budget(image_inputs)
-    elif args.image_resize == "clear_question":
+    elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs) # resize_by_token_budget(image_inputs)
     teacher_texts = texts
     teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
@@ -770,7 +771,7 @@ def collate_fn_avt_v4(examples, alignment="boxed_start"):
                 img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)
                 user_image_inputs[i] = img
                 resize_ptr += batch_assistant_img_cnts[i] + 1
-    elif args.image_resize == "clear_question":
+    elif args.image_resize == "clear_question_img":
         for i, img in enumerate(user_image_inputs):
             if new_sizes[resize_ptr] is not None:
                 img = img.resize(new_sizes[resize_ptr], Image.BICUBIC)

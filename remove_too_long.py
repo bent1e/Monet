@@ -49,7 +49,11 @@ def _prepare_single_sample_for_batch(
     """
     sample_copy = copy.deepcopy(sample)
     conversations = sample_copy['data']
-    dataset_name = conversations[1]['content'][0]['image_file_name'].split('/')[-3]
+    if 'image_file_name' in conversations[1]['content'][0]:
+        img_key = 'image_file_name'
+    else:
+        img_key = 'image'
+    dataset_name = conversations[1]['content'][0][img_key].split('/')[-3]
 
     # Normalize the conversation & basic validation
     for i, step in enumerate(conversations):
@@ -58,10 +62,10 @@ def _prepare_single_sample_for_batch(
             new_step["content"][0]["text"] = "You are a helpful assistant."
         for j, content in enumerate(new_step["content"]):
             if content["type"] == "image":
-                img_file_name = content.pop("image_file_name")
+                img_file_name = content.pop(img_key)
                 if "kling_mm" in dataset_root:
                     img_file_name = img_file_name.replace("created_dataset/filtered_data/", "")
-                content["image"] = img_file_name
+                content["image"] = os.path.join(dataset_root, img_file_name)
                 if j > 0 and new_step["content"][j - 1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j - 1]["text"]:
                         return None  # invalid per your rule
@@ -75,6 +79,16 @@ def _prepare_single_sample_for_batch(
     # Build single-sample image inputs and resize (must be bsz==1 here)
     image_inputs, _ = process_vision_info([conversations])
     image_inputs, _ = resize_by_token_budget(image_inputs)  # only supports single sample
+
+    # remove the dataset root prefix
+    for i, step in enumerate(conversations):
+        new_step = step.copy()
+        for j, content in enumerate(new_step["content"]):
+            if content["type"] == "image":
+                img_file_name = content.pop("image")
+                content["image"] = img_file_name.replace(f"{dataset_root}/","")
+            new_step["content"][j] = content
+        conversations[i] = new_step
 
     return sample_copy, text, image_inputs, dataset_name
 
@@ -201,11 +215,22 @@ Example usages:
 conda activate mirage
 cd /home/dids/shiyang/codes/abstract-visual-token
 python remove_too_long.py \
-    --max_seq_len 3000 \
+    --max_seq_len 2500 \
     --bsz 128 \
     --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
     --data_path \
-    "/home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json"
+  "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
+  "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" 
+
+conda activate mirage
+cd /home/dids/shiyang/codes/abstract-visual-token
+python remove_too_long.py \
+    --max_seq_len 2500 \
+    --bsz 128 \
+    --load_model_path "/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct" \
+    --data_path \
+    "./new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000.json"
+
 
 # Another env
 source /pfs/wangzihao11/miniconda3/bin/activate

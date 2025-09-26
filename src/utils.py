@@ -86,7 +86,7 @@ def get_args():
     parser.add_argument("--observation_tokens_only_see_image_tokens", action='store_true', default=False)
     parser.add_argument("--observation_tokens_only_see_latent_tokens", action='store_true', default=False)
     parser.add_argument("--observation_tokens_cannot_see_question_image", action='store_true', default=False)
-    parser.add_argument("--latent_can_see_all_previous", action='store_true', default=False)
+    parser.add_argument("--latent_can_see_all_previous", action='store_true', default=True)
     parser.add_argument("--observation_tokens_only_see_question_and_latent", action='store_true', default=False)
     parser.add_argument("--mask_question_image", action='store_true', default=False)
     # ===== Precomputed teacher latent loading =====
@@ -765,8 +765,8 @@ def resize_by_token_budget_sample_wise(images_per_sample,
     return processed_per_sample, sizes_per_sample
 
 def resize_diff(images, 
-                question_img_max_pixels=1500*28*28,#2000*28*28, 
-                remain_global_max_pixels=1600*28*28,#800*3*28*28,
+                question_img_max_pixels=1280*28*28,#2000*28*28, 
+                remain_global_max_pixels=800*28*28,#800*3*28*28,
                 remain_per_img_max_pixels=800*28*28,#1280*28*28,
                 divisor=28):
     processed = []

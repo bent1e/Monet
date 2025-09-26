@@ -2073,7 +2073,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                         seg_att_m=pre_att_m,
                         past_kv=None,
                         need_hidden=False,
-                        no_grad_mode=False, #True if stage == 'avt_v2_stage1' else False,  # no_grad_mode only for avt_v2_stage1
+                        no_grad_mode=False, #True if kwargs['stage'] == 'avt_v2_stage1' else False,  # no_grad_mode only for avt_v2_stage1
                         **kwargs,
                     )
                     batch_last_hidden_state[b, :ans_start, :] = pre_out.last_hidden_state[0]
@@ -2173,7 +2173,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                                 seg_att_m=img_att_m,
                                 past_kv=past_kv,
                                 need_hidden=False,
-                                no_grad_mode=False,
+                                no_grad_mode=False, #True if kwargs['stage'] == 'avt_v2_stage1' else False,  # no_grad_mode only for avt_v2_stage1
                                 **kwargs,
                             )
                             batch_last_hidden_state[b, cut:e, :] = img_out.last_hidden_state[0]

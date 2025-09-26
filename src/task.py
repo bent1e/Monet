@@ -124,8 +124,6 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
         seen_assistant_image = False if step["role"] == "assistant" else None
         for j, content in enumerate(new_step["content"]):        
             if content["type"] == "image":
-                #if "image_file_name" not in content:
-                #    print(dataset_root)
                 if "image_file_name" in content:
                     img_file_name = content.pop("image_file_name")
                 else:
@@ -133,7 +131,6 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
                 if "kling_mm" in dataset_root:
                     img_file_name = img_file_name.replace("created_dataset/filtered_data/", "")
                 content["image"] = os.path.join(dataset_root, img_file_name)
-                #content["image"] = content['image_file_name'].replace("created_dataset/filtered_data","/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual")
                 if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
                         return None
@@ -148,7 +145,7 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
                     seen_observation = True
             elif content["type"] == "text" and step["role"] == "user":
                 img_key = "image_file_name" if "image_file_name" in new_step["content"][0] else "image"
-                if 'Zebra_CoT_visual_search' not in new_step["content"][0][img_key]: # keep boxed instructions for Zebra_CoT_visual_search
+                if 'Zebra_CoT_visual_search' not in new_step["content"][0][img_key] and 'Zebra_CoT_count' not in new_step["content"][0][img_key]: # keep boxed instructions for Zebra_CoT_visual_search
                     content["text"] = content["text"].replace("\nPut your final answer within \\boxed{}.", "")
 
             new_step["content"][j] = content

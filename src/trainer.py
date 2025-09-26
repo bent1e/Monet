@@ -480,229 +480,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         # Separate, no_grad forward for attention analysis (interval-gated) BEFORE enabling grad checkpointing
         # This ensures no state toggles between training forward and backward.
         if getattr(self.args, 'attn_analysis', False):
-            try:
-                step_now = int(getattr(self.state, 'global_step', 0) or 0)
-                interval = int(getattr(self.args, 'attn_analysis_interval', 0) or getattr(self.args, 'logging_steps', 0) or 50)
-                if interval <= 0:
-                    interval = 50
-                if (step_now % interval) == 0:
-                    analysis_inputs = dict(inputs)
-                    analysis_inputs['output_attentions'] = True
-                    analysis_inputs['attn_analysis'] = True
-                    analysis_inputs['loss_type'] = []
-                    analysis_inputs['labels'] = None
-                    analysis_inputs['latent_mode'] = False
-                    analysis_inputs['ce_patch_pos'] = outputs.ce_patch_pos
-                    analysis_inputs['ce_patch_vec'] = outputs.ce_patch_vec
-                    bool_attn_mask_4d = inputs['attention_mask_4d']['full_attention']
-                    analysis_inputs['attention_mask_4d'] = {"full_attention": (~bool_attn_mask_4d).float()*-1e7}
-                    prev_attn_impl = getattr(model.config, '_attn_implementation', None)
-                    was_training = model.training
-                    model.eval()
-                    model.config._attn_implementation = 'eager'
-
-                    with torch.no_grad():
-                        analysis_out = model(**analysis_inputs, return_dict=True, output_hidden_states=False)
-
-                    atts = getattr(analysis_out, 'attentions', None)
-                    input_ids = analysis_inputs.get('input_ids', None)
-                    obs_poss = inputs.get('observation_poss', None)
-                    if atts is not None and input_ids is not None and obs_poss is not None and len(atts) > 0:
-                        layers = []
-                        for a in atts:
-                            t = a[0] if isinstance(a, (list, tuple)) else a
-                            if torch.is_tensor(t) and t.dim() == 4:
-                                layers.append(t)
-                        if len(layers) > 0:
-                            B, H, S, _ = layers[0].shape
-                            device = layers[0].device
-                            ids = input_ids.to(device)
-                            # Build obs/query mask (B,S)
-                            obs_mask = torch.zeros((B, S), dtype=torch.bool, device=device)
-                            for b, poss in enumerate(obs_poss):
-                                if poss is None:
-                                    continue
-                                valid = [p for p in poss if isinstance(p, int) and 0 <= p < S]
-                                if len(valid) > 0:
-                                    obs_mask[b, torch.tensor(valid, device=device, dtype=torch.long)] = True
-
-                            # Image masks
-                            img_mask = (ids == self._img_pad_id).to(device) if self._img_pad_id is not None else None
-                            # Split question image vs rest images per sample: first contiguous block of img tokens
-                            qimg_mask = None
-                            img_rest_mask = None
-                            if img_mask is not None:
-                                qimg_mask = torch.zeros_like(img_mask)
-                                img_rest_mask = torch.zeros_like(img_mask)
-                                for b in range(B):
-                                    row = img_mask[b]
-                                    idx = (row.nonzero(as_tuple=False).flatten())
-                                    if idx.numel() == 0:
-                                        continue
-                                    start = int(idx[0].item())
-                                    # extend contiguous block
-                                    end = start
-                                    while end + 1 < row.numel() and row[end + 1].item():
-                                        end += 1
-                                    qimg_mask[b, start : end + 1] = True
-                                    # rest are all other image positions
-                                    if idx.numel() > (end - start + 1):
-                                        img_rest_mask[b] = row & (~qimg_mask[b])
-                    # Latent masks
-                    latent_mask = (ids == self._latent_pad_id).to(device) if (self._latent_pad_id is not None and self._latent_pad_id >= 0) else None
-                    # Other (non-image, non-latent) masks
-                    other_mask = None
-                    if img_mask is not None or latent_mask is not None:
-                        other_mask = torch.ones((B, S), dtype=torch.bool, device=device)
-                        if img_mask is not None:
-                            other_mask &= (~img_mask)
-                        if latent_mask is not None:
-                            other_mask &= (~latent_mask)
-
-                    # Strictly lower triangular mask for k < q (S,S)
-                    tril = torch.tril(torch.ones((S, S), dtype=torch.bool, device=device), diagonal=-1)
-
-                    def _mean_and_sum(att: torch.Tensor, mask_k: torch.Tensor, restrict_prev: bool = False):
-                        """
-                        mean: 与原先一致，按 (B,H,q,k) 对所有有效 pair 求平均（再对 batch 取平均）。
-                        sum: 按需求修改：先对同一个 query 的该类 key 做 sum（跨 k），
-                             然后对所有 query 做平均（再对头与 batch 做平均）。
-                        """
-                        if mask_k is None:
-                            return None, None
-                        # Masks
-                        q_mask_b1qs1 = obs_mask[:, None, :, None]  # (B,1,S,1)
-                        k_mask_b11s  = mask_k[:, None, None, :]    # (B,1,1,S)
-                        pair_mask = q_mask_b1qs1 & k_mask_b11s     # (B,1,S,S)
-                        if restrict_prev:
-                            pair_mask = pair_mask & tril[None, None, :, :]
-
-                        # If no valid pairs, return Nones
-                        num_pairs = pair_mask.sum(dim=(1, 2, 3))  # (B,)
-                        if (num_pairs == 0).all():
-                            return None, None
-
-                        # mean over pairs and heads (old definition)
-                        masked_sum_all = (att * pair_mask).sum(dim=(1, 2, 3))  # (B,)
-                        denom = num_pairs * max(1, H)
-                        mean_b = masked_sum_all / denom.clamp_min(1)
-                        valid_b = num_pairs > 0
-                        mean_val = mean_b[valid_b].mean() if valid_b.any() else None
-
-                        # sum metric (new definition):
-                        # 1) per-query sum over keys in category: sum_k att[b,h,q,k]
-                        #    pair_mask ensures only selected keys and queries contribute.
-                        per_q_sum = (att * pair_mask).sum(dim=-1)  # (B,H,S)
-                        # 2) average across queries (only where obs_mask True)
-                        obs_mask_bhs = obs_mask[:, None, :]  # (B,1,S)
-                        q_count = obs_mask.sum(dim=-1)       # (B,)
-                        # Avoid div by 0: only keep batches with q_count>0
-                        if (q_count > 0).any():
-                            # Sum over queries then divide by #queries per batch
-                            per_bh_avg = (per_q_sum * obs_mask_bhs).sum(dim=-1)  # (B,H)
-                            per_bh_avg = per_bh_avg / q_count.clamp_min(1)[:, None]
-                            # 3) average across heads, then across valid batches
-                            per_b_avg = per_bh_avg.mean(dim=1)  # (B)
-                            valid_q = q_count > 0
-                            sum_val = per_b_avg[valid_q].mean() if valid_q.any() else None
-                        else:
-                            sum_val = None
-
-                        return mean_val, sum_val
-
-                    # Per-layer arrays to save
-                    L = len(layers)
-                    per_layer = {
-                        'mean_qimg': torch.full((L,), float('nan')),
-                        'sum_qimg': torch.full((L,), float('nan')),
-                        'mean_img_rest': torch.full((L,), float('nan')),
-                        'sum_img_rest': torch.full((L,), float('nan')),
-                        'mean_latent': torch.full((L,), float('nan')),
-                        'sum_latent': torch.full((L,), float('nan')),
-                        'mean_other_prev': torch.full((L,), float('nan')),
-                        'sum_other_prev': torch.full((L,), float('nan')),
-                    }
-
-                    for li, att in enumerate(layers):
-                        # Compute metrics
-                        m_qimg, s_qimg = _mean_and_sum(att, qimg_mask, restrict_prev=False)
-                        m_img_r, s_img_r = _mean_and_sum(att, img_rest_mask, restrict_prev=False)
-                        m_lat, s_lat = _mean_and_sum(att, latent_mask, restrict_prev=False)
-                        m_oth, s_oth = _mean_and_sum(att, other_mask, restrict_prev=True)
-
-                        if m_qimg is not None and torch.isfinite(m_qimg):
-                            per_layer['mean_qimg'][li] = m_qimg.detach().float()
-                        if s_qimg is not None and torch.isfinite(s_qimg):
-                            per_layer['sum_qimg'][li] = s_qimg.detach().float()
-                        if m_img_r is not None and torch.isfinite(m_img_r):
-                            per_layer['mean_img_rest'][li] = m_img_r.detach().float()
-                        if s_img_r is not None and torch.isfinite(s_img_r):
-                            per_layer['sum_img_rest'][li] = s_img_r.detach().float()
-                        if m_lat is not None and torch.isfinite(m_lat):
-                            per_layer['mean_latent'][li] = m_lat.detach().float()
-                        if s_lat is not None and torch.isfinite(s_lat):
-                            per_layer['sum_latent'][li] = s_lat.detach().float()
-                        if m_oth is not None and torch.isfinite(m_oth):
-                            per_layer['mean_other_prev'][li] = m_oth.detach().float()
-                        if s_oth is not None and torch.isfinite(s_oth):
-                            per_layer['sum_other_prev'][li] = s_oth.detach().float()
-
-                    # Update rolling accumulators with last layer (for quick scalar logging, similar to previous behavior)
-                    last_idx = len(layers) - 1
-                    def _nan_to_none(x: torch.Tensor):
-                        return None if (x.numel()==0 or not torch.isfinite(x)) else x
-                    m_qimg = _nan_to_none(per_layer['mean_qimg'][last_idx])
-                    m_img_r = _nan_to_none(per_layer['mean_img_rest'][last_idx])
-                    m_lat = _nan_to_none(per_layer['mean_latent'][last_idx])
-                    m_oth = _nan_to_none(per_layer['mean_other_prev'][last_idx])
-                    s_qimg = _nan_to_none(per_layer['sum_qimg'][last_idx])
-                    s_img_r = _nan_to_none(per_layer['sum_img_rest'][last_idx])
-                    s_lat = _nan_to_none(per_layer['sum_latent'][last_idx])
-                    s_oth = _nan_to_none(per_layer['sum_other_prev'][last_idx])
-
-                    if m_qimg is not None:
-                        self._obs_to_qimg_att_mean_cum += float(m_qimg.item())
-                        self._obs_to_qimg_att_mean_steps += 1
-                    if s_qimg is not None:
-                        self._obs_to_qimg_att_sum_cum += float(s_qimg.item())
-                        self._obs_to_qimg_att_sum_steps += 1
-                    if m_img_r is not None:
-                        self._obs_to_img_rest_att_mean_cum += float(m_img_r.item())
-                        self._obs_to_img_rest_att_mean_steps += 1
-                    if s_img_r is not None:
-                        self._obs_to_img_rest_att_sum_cum += float(s_img_r.item())
-                        self._obs_to_img_rest_att_sum_steps += 1
-                    if m_lat is not None:
-                        self._obs_to_latent_att_cum += float(m_lat.item())
-                        self._obs_to_latent_att_steps += 1
-                    if s_lat is not None:
-                        self._obs_to_latent_att_sum_cum += float(s_lat.item())
-                        self._obs_to_latent_att_sum_steps += 1
-                    if m_oth is not None:
-                        self._obs_to_other_prev_att_mean_cum += float(m_oth.item())
-                        self._obs_to_other_prev_att_mean_steps += 1
-                    if s_oth is not None:
-                        self._obs_to_other_prev_att_sum_cum += float(s_oth.item())
-                        self._obs_to_other_prev_att_sum_steps += 1
-
-                    # Stash per-layer arrays for saving at log step
-                    self._last_attn_layer_stats = {
-                        'global_step': int(getattr(self.state, 'global_step', 0) or 0),
-                        'per_layer': {k: v.cpu().numpy() for k, v in per_layer.items()},
-                    }
-                    # Restore impl and training mode
-                    try:
-                        model.config._attn_implementation = prev_attn_impl
-                    except Exception:
-                        pass
-                    if was_training:
-                        try:
-                            model.train()
-                        except Exception:
-                            pass
-
-            except Exception:
-                pass
+            self.attn_analysis(model, inputs, outputs)
 
         # After analysis, run the CE training forward with grad checkpointing enabled and use_cache disabled
         # Enforce use_cache=False to avoid recompute mismatches with checkpointing
@@ -745,9 +523,7 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
         # Ensure training forward does NOT request attentions (prevents checkpoint recompute mismatch)
         inputs.pop('output_attentions', None)
         inputs.pop('attn_analysis', None)
-        
-        # Force eager attention to ensure attention weights are available when computing emphasize loss
-        prev_impl_train = getattr(model.config, '_attn_implementation', None)
+        inputs.pop('attention_mask_4d')
 
         teacher_ce_loss, teacher_output = super().compute_loss(
                 model, 
@@ -803,6 +579,231 @@ class CustomTrainerAVT_V2_Stage1(SFTTrainer):
                 pass
 
         return total_loss
+
+    def attn_analysis(self, model, inputs, outputs):
+        try:
+            step_now = int(getattr(self.state, 'global_step', 0) or 0)
+            interval = int(getattr(self.args, 'attn_analysis_interval', 0) or getattr(self.args, 'logging_steps', 0) or 50)
+            if interval <= 0:
+                interval = 50
+            if (step_now % interval) == 0:
+                analysis_inputs = dict(inputs)
+                analysis_inputs['output_attentions'] = True
+                analysis_inputs['attn_analysis'] = True
+                analysis_inputs['loss_type'] = []
+                analysis_inputs['labels'] = None
+                analysis_inputs['latent_mode'] = False
+                analysis_inputs['ce_patch_pos'] = outputs.ce_patch_pos
+                analysis_inputs['ce_patch_vec'] = outputs.ce_patch_vec
+                bool_attn_mask_4d = inputs['attention_mask_4d']['full_attention']
+                analysis_inputs['attention_mask_4d'] = {"full_attention": (~bool_attn_mask_4d).float()*-1e7}
+                prev_attn_impl = getattr(model.config, '_attn_implementation', None)
+                was_training = model.training
+                model.eval()
+                model.config._attn_implementation = 'eager'
+
+                with torch.no_grad():
+                    analysis_out = model(**analysis_inputs, return_dict=True, output_hidden_states=False)
+
+                atts = getattr(analysis_out, 'attentions', None)
+                input_ids = analysis_inputs.get('input_ids', None)
+                obs_poss = inputs.get('observation_poss', None)
+                if atts is not None and input_ids is not None and obs_poss is not None and len(atts) > 0:
+                    layers = []
+                    for a in atts:
+                        t = a[0] if isinstance(a, (list, tuple)) else a
+                        if torch.is_tensor(t) and t.dim() == 4:
+                            layers.append(t)
+                    if len(layers) > 0:
+                        B, H, S, _ = layers[0].shape
+                        device = layers[0].device
+                        ids = input_ids.to(device)
+                        # Build obs/query mask (B,S)
+                        obs_mask = torch.zeros((B, S), dtype=torch.bool, device=device)
+                        for b, poss in enumerate(obs_poss):
+                            if poss is None:
+                                continue
+                            valid = [p for p in poss if isinstance(p, int) and 0 <= p < S]
+                            if len(valid) > 0:
+                                obs_mask[b, torch.tensor(valid, device=device, dtype=torch.long)] = True
+
+                        # Image masks
+                        img_mask = (ids == self._img_pad_id).to(device) if self._img_pad_id is not None else None
+                        # Split question image vs rest images per sample: first contiguous block of img tokens
+                        qimg_mask = None
+                        img_rest_mask = None
+                        if img_mask is not None:
+                            qimg_mask = torch.zeros_like(img_mask)
+                            img_rest_mask = torch.zeros_like(img_mask)
+                            for b in range(B):
+                                row = img_mask[b]
+                                idx = (row.nonzero(as_tuple=False).flatten())
+                                if idx.numel() == 0:
+                                    continue
+                                start = int(idx[0].item())
+                                # extend contiguous block
+                                end = start
+                                while end + 1 < row.numel() and row[end + 1].item():
+                                    end += 1
+                                qimg_mask[b, start : end + 1] = True
+                                # rest are all other image positions
+                                if idx.numel() > (end - start + 1):
+                                    img_rest_mask[b] = row & (~qimg_mask[b])
+                # Latent masks
+                latent_mask = (ids == self._latent_pad_id).to(device) if (self._latent_pad_id is not None and self._latent_pad_id >= 0) else None
+                # Other (non-image, non-latent) masks
+                other_mask = None
+                if img_mask is not None or latent_mask is not None:
+                    other_mask = torch.ones((B, S), dtype=torch.bool, device=device)
+                    if img_mask is not None:
+                        other_mask &= (~img_mask)
+                    if latent_mask is not None:
+                        other_mask &= (~latent_mask)
+
+                # Strictly lower triangular mask for k < q (S,S)
+                tril = torch.tril(torch.ones((S, S), dtype=torch.bool, device=device), diagonal=-1)
+
+                def _mean_and_sum(att: torch.Tensor, mask_k: torch.Tensor, restrict_prev: bool = False):
+                    """
+                    mean: 与原先一致，按 (B,H,q,k) 对所有有效 pair 求平均（再对 batch 取平均）。
+                    sum: 按需求修改：先对同一个 query 的该类 key 做 sum（跨 k），
+                            然后对所有 query 做平均（再对头与 batch 做平均）。
+                    """
+                    if mask_k is None:
+                        return None, None
+                    # Masks
+                    q_mask_b1qs1 = obs_mask[:, None, :, None]  # (B,1,S,1)
+                    k_mask_b11s  = mask_k[:, None, None, :]    # (B,1,1,S)
+                    pair_mask = q_mask_b1qs1 & k_mask_b11s     # (B,1,S,S)
+                    if restrict_prev:
+                        pair_mask = pair_mask & tril[None, None, :, :]
+
+                    # If no valid pairs, return Nones
+                    num_pairs = pair_mask.sum(dim=(1, 2, 3))  # (B,)
+                    if (num_pairs == 0).all():
+                        return None, None
+
+                    # mean over pairs and heads (old definition)
+                    masked_sum_all = (att * pair_mask).sum(dim=(1, 2, 3))  # (B,)
+                    denom = num_pairs * max(1, H)
+                    mean_b = masked_sum_all / denom.clamp_min(1)
+                    valid_b = num_pairs > 0
+                    mean_val = mean_b[valid_b].mean() if valid_b.any() else None
+
+                    # sum metric (new definition):
+                    # 1) per-query sum over keys in category: sum_k att[b,h,q,k]
+                    #    pair_mask ensures only selected keys and queries contribute.
+                    per_q_sum = (att * pair_mask).sum(dim=-1)  # (B,H,S)
+                    # 2) average across queries (only where obs_mask True)
+                    obs_mask_bhs = obs_mask[:, None, :]  # (B,1,S)
+                    q_count = obs_mask.sum(dim=-1)       # (B,)
+                    # Avoid div by 0: only keep batches with q_count>0
+                    if (q_count > 0).any():
+                        # Sum over queries then divide by #queries per batch
+                        per_bh_avg = (per_q_sum * obs_mask_bhs).sum(dim=-1)  # (B,H)
+                        per_bh_avg = per_bh_avg / q_count.clamp_min(1)[:, None]
+                        # 3) average across heads, then across valid batches
+                        per_b_avg = per_bh_avg.mean(dim=1)  # (B)
+                        valid_q = q_count > 0
+                        sum_val = per_b_avg[valid_q].mean() if valid_q.any() else None
+                    else:
+                        sum_val = None
+
+                    return mean_val, sum_val
+
+                # Per-layer arrays to save
+                L = len(layers)
+                per_layer = {
+                    'mean_qimg': torch.full((L,), float('nan')),
+                    'sum_qimg': torch.full((L,), float('nan')),
+                    'mean_img_rest': torch.full((L,), float('nan')),
+                    'sum_img_rest': torch.full((L,), float('nan')),
+                    'mean_latent': torch.full((L,), float('nan')),
+                    'sum_latent': torch.full((L,), float('nan')),
+                    'mean_other_prev': torch.full((L,), float('nan')),
+                    'sum_other_prev': torch.full((L,), float('nan')),
+                }
+
+                for li, att in enumerate(layers):
+                    # Compute metrics
+                    m_qimg, s_qimg = _mean_and_sum(att, qimg_mask, restrict_prev=False)
+                    m_img_r, s_img_r = _mean_and_sum(att, img_rest_mask, restrict_prev=False)
+                    m_lat, s_lat = _mean_and_sum(att, latent_mask, restrict_prev=False)
+                    m_oth, s_oth = _mean_and_sum(att, other_mask, restrict_prev=True)
+
+                    if m_qimg is not None and torch.isfinite(m_qimg):
+                        per_layer['mean_qimg'][li] = m_qimg.detach().float()
+                    if s_qimg is not None and torch.isfinite(s_qimg):
+                        per_layer['sum_qimg'][li] = s_qimg.detach().float()
+                    if m_img_r is not None and torch.isfinite(m_img_r):
+                        per_layer['mean_img_rest'][li] = m_img_r.detach().float()
+                    if s_img_r is not None and torch.isfinite(s_img_r):
+                        per_layer['sum_img_rest'][li] = s_img_r.detach().float()
+                    if m_lat is not None and torch.isfinite(m_lat):
+                        per_layer['mean_latent'][li] = m_lat.detach().float()
+                    if s_lat is not None and torch.isfinite(s_lat):
+                        per_layer['sum_latent'][li] = s_lat.detach().float()
+                    if m_oth is not None and torch.isfinite(m_oth):
+                        per_layer['mean_other_prev'][li] = m_oth.detach().float()
+                    if s_oth is not None and torch.isfinite(s_oth):
+                        per_layer['sum_other_prev'][li] = s_oth.detach().float()
+
+                # Update rolling accumulators with last layer (for quick scalar logging, similar to previous behavior)
+                last_idx = len(layers) - 1
+                def _nan_to_none(x: torch.Tensor):
+                    return None if (x.numel()==0 or not torch.isfinite(x)) else x
+                m_qimg = _nan_to_none(per_layer['mean_qimg'][last_idx])
+                m_img_r = _nan_to_none(per_layer['mean_img_rest'][last_idx])
+                m_lat = _nan_to_none(per_layer['mean_latent'][last_idx])
+                m_oth = _nan_to_none(per_layer['mean_other_prev'][last_idx])
+                s_qimg = _nan_to_none(per_layer['sum_qimg'][last_idx])
+                s_img_r = _nan_to_none(per_layer['sum_img_rest'][last_idx])
+                s_lat = _nan_to_none(per_layer['sum_latent'][last_idx])
+                s_oth = _nan_to_none(per_layer['sum_other_prev'][last_idx])
+
+                if m_qimg is not None:
+                    self._obs_to_qimg_att_mean_cum += float(m_qimg.item())
+                    self._obs_to_qimg_att_mean_steps += 1
+                if s_qimg is not None:
+                    self._obs_to_qimg_att_sum_cum += float(s_qimg.item())
+                    self._obs_to_qimg_att_sum_steps += 1
+                if m_img_r is not None:
+                    self._obs_to_img_rest_att_mean_cum += float(m_img_r.item())
+                    self._obs_to_img_rest_att_mean_steps += 1
+                if s_img_r is not None:
+                    self._obs_to_img_rest_att_sum_cum += float(s_img_r.item())
+                    self._obs_to_img_rest_att_sum_steps += 1
+                if m_lat is not None:
+                    self._obs_to_latent_att_cum += float(m_lat.item())
+                    self._obs_to_latent_att_steps += 1
+                if s_lat is not None:
+                    self._obs_to_latent_att_sum_cum += float(s_lat.item())
+                    self._obs_to_latent_att_sum_steps += 1
+                if m_oth is not None:
+                    self._obs_to_other_prev_att_mean_cum += float(m_oth.item())
+                    self._obs_to_other_prev_att_mean_steps += 1
+                if s_oth is not None:
+                    self._obs_to_other_prev_att_sum_cum += float(s_oth.item())
+                    self._obs_to_other_prev_att_sum_steps += 1
+
+                # Stash per-layer arrays for saving at log step
+                self._last_attn_layer_stats = {
+                    'global_step': int(getattr(self.state, 'global_step', 0) or 0),
+                    'per_layer': {k: v.cpu().numpy() for k, v in per_layer.items()},
+                }
+                # Restore impl and training mode
+                try:
+                    model.config._attn_implementation = prev_attn_impl
+                except Exception:
+                    pass
+                if was_training:
+                    try:
+                        model.train()
+                    except Exception:
+                        pass
+
+        except Exception:
+            pass
 
 
     def on_epoch_end(self):
