@@ -1,3 +1,27 @@
+'''
+export CUDA_HOME=/usr/local/cuda-12.6
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
+conda activate mirage
+cd /home/dids/shiyang/codes/abstract-visual-token
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export TOKENIZERS_PARALLELISM=false
+CKPT=avt_sft/9.24_debug_avt_sft_com_refocus_search-fwsh_ce5.0/checkpoint-180
+torchrun --nproc-per-node=4 --master-port=29501 -m src.precompute_teacher_latents \
+    --bsz 1 \
+    --task "mm-reasoning" \
+    --data_path \
+    "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
+  "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" \
+  "./new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json" \
+    --log_file "./log.txt" \
+    --load_model_path /home/dids/shiyang/checkpoints/${CKPT} \
+    --save_model_path ./new/precomputed_teacher_latents/${CKPT} \
+    --deepspeed ./deepspeed/ds_zero2_gpu.json \
+    --output_hidden_states
+
+'''
+
 import os as _early_os
 # Also import standard os for later usages in this file
 import os
@@ -243,9 +267,9 @@ def main():
 
                     outputs = model(**inputs, return_dict=True)
 
-                    if args.output_latent_embeds:
+                    if args.output_latent_embeds: # output latent embeddings only for last layer
                         teacher_reps = outputs.latent_embeds
-                    elif args.output_hidden_states:
+                    elif args.output_hidden_states: # output hidden states for all layers (can also output hidden states of all layers for latents)
                         teacher_reps = outputs.hidden_states
                     # Save per global sample index to avoid collisions
                     B = len(teacher_reps)

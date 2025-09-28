@@ -2582,7 +2582,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         mean_emphasize_acc = None
         logits = None
-        loss = 0
+        loss = 0.
         loss_dict = {}
         if "ce" in loss_type:
             # Optional: apply per-token weighting on ce_emphasize_poss

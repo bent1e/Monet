@@ -533,22 +533,8 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
     texts = [place_output_image_avt(text) for text in texts]
-    
-    ################################################
-    # teacher
-    ################################################
     image_inputs, _ = process_vision_info(examples)
-    image_inputs, new_sizes = resize_by_token_budget(image_inputs)
-    teacher_texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
-    teacher_batch = processor(text=teacher_texts, images=image_inputs, return_tensors="pt", padding=True)
-    total_image_pads = 0
-    for txt in texts:
-        total_image_pads += txt.count("<|image_pad|>")
-    assert total_image_pads == len(image_inputs)
-    batch['teacher_pixel_values'] = teacher_batch['pixel_values']
-    batch['teacher_image_grid_thw'] = teacher_batch['image_grid_thw']
-    batch['teacher_input_ids'] = teacher_batch['input_ids']
-    batch['teacher_attention_mask'] = teacher_batch['attention_mask']
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=2000*28*28, per_img_max_pixels=2000*28*28,)
     
     ################################################
     # student
@@ -583,19 +569,6 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
         batch["student_attention_mask_4d"] = {"full_attention": attn_mask_4d }
 
     batch["student_alignment_poss"] = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_pad_idx)
-    batch["teacher_alignment_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_pad_idx)
-
-    '''latent_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_start_idx)
-    latent_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, latent_end_idx)
-    batch["ce_emphasize_poss"] = []
-    for start_poss, end_poss in zip(latent_start_poss, latent_end_poss):
-        poss_of_a_sample = []
-        if len(start_poss) > 0 and len(end_poss) > 0:
-            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
-            poss_of_a_sample.extend(start_poss)
-            poss_of_a_sample.extend(end_poss)
-        batch["ce_emphasize_poss"].append(poss_of_a_sample)'''
-
 
     observation_start_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_start_idx)
     observation_end_poss = find_ids_poss(batch["student_input_ids"], answer_start_pattern, observation_end_idx)
@@ -610,7 +583,7 @@ def collate_fn_avt_v2_stage2(examples, alignment="boxed_start"):
         batch["observation_poss"].append(poss_of_a_sample)
 
     # mask tokens of '<|im_start|>assistant', '<|endoftext|>', and '<abs_vis_token_pad>' 
-    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[img_pad_idx, img_start_idx, img_end_idx, end_pad_token_idx, latent_pad_idx, observation_start_idx, observation_end_idx])
+    batch["student_labels"] = generate_labels_after_multi_token_start(batch["student_input_ids"], answer_start_pattern, ignore_ids=[img_pad_idx, img_start_idx, img_end_idx, end_pad_token_idx, latent_pad_idx, latent_end_idx, observation_start_idx, observation_end_idx])
 
     return batch
 

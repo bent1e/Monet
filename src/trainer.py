@@ -921,47 +921,23 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         """
         Compute training loss for AVT v2 stage2 with optional cached teacher latents.
         """
-        # Prepare teacher forward inputs (for latent extraction)
-        inputs['stage'] = 'avt_v2_stage2'
-        inputs['latent_mode'] = True
-        inputs['input_ids'] = inputs['teacher_input_ids']
-        inputs['attention_mask'] = inputs['teacher_attention_mask']
-        inputs['pixel_values'] = inputs['teacher_pixel_values']
-        inputs['image_grid_thw'] = inputs['teacher_image_grid_thw']
-        inputs['labels'] = None
-        inputs['alignment_poss'] = inputs['teacher_alignment_poss']
-        model.gradient_checkpointing_disable()
-        inputs['loss_type'] = []
-        inputs['output_latent_embeds'] = True
-
         # Try to load precomputed teacher latents
-        teacher_outputs = None
-        use_cached = False
-        batch_metadata = inputs.get('metadata', None)
-        if batch_metadata is not None and self.teacher_latent_dir and os.path.isdir(self.teacher_latent_dir):
-            latents_list = []
-            for metadata in batch_metadata:
-                dataset_name = metadata['dataset_name']
-                sample_id = metadata['sample_id']
-                metadata_info = f"{self.args.alignment_layer}_{dataset_name}_{sample_id}"
-                path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
-                if not os.path.isfile(path):
-                    latents_list = []
-                    raise RuntimeError(f"Missing teacher latent file: {path}")
-                data = torch.load(path, map_location='cpu')
-                latents_list.append(data['latent'])
-            if batch_metadata is not None and len(latents_list) == len(batch_metadata):
-                class _Obj:
-                    pass
-                teacher_outputs = _Obj()
-                teacher_outputs.latent_embeds = latents_list
-                use_cached = True
+        teacher_latents = None
+        batch_metadata = inputs['metadata']
 
-        # Fallback to online teacher forward
-        if not use_cached:
-            raise NotImplementedError("Online teacher forward not implemented; precompute and save teacher latents first.")
-            #with torch.no_grad():
-            #    teacher_outputs = model(**inputs, return_dict=True, output_hidden_states=True)
+        latents_list = []
+        for metadata in batch_metadata:
+            dataset_name = metadata['dataset_name']
+            sample_id = metadata['sample_id']
+            metadata_info = f"{self.args.alignment_layer}_{dataset_name}_{sample_id}"
+            path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
+            if not os.path.isfile(path):
+                latents_list = []
+                raise RuntimeError(f"Missing teacher latent file: {path}")
+            data = torch.load(path, map_location='cpu')
+            latents_list.append(data['latent'].detach())
+        if batch_metadata is not None and len(latents_list) == len(batch_metadata):
+            teacher_latents = latents_list
 
         # Student alignment forward
         inputs['latent_mode'] = True
@@ -972,13 +948,14 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         if 'labels' in inputs:
             inputs.pop('labels')
         inputs['alignment_poss'] = inputs['student_alignment_poss']
-        inputs['teacher_hidden_states_for_alignment'] = teacher_outputs.latent_embeds
+        inputs['teacher_hidden_states_for_alignment'] = teacher_latents
         model.gradient_checkpointing_disable()
         inputs['loss_type'] = ['alignment']
         inputs['output_latent_embeds'] = False
-        (alignment_loss, student_outputs) = super().compute_loss(
+        (_, student_outputs) = super().compute_loss(
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
+        alignment_loss = student_outputs.loss_dict['alignment']
 
         # Student CE forward
         inputs['latent_mode'] = False
@@ -1009,7 +986,7 @@ class CustomTrainerAVT_V2_Stage2(SFTTrainer):
         outputs_student_loss = student_ce_loss.item()
 
         # Periodic light GC on main process
-        del student_outputs, teacher_outputs
+        del student_outputs
         step = int(getattr(self.state, 'global_step', 0) or 0)
         if self.is_main_process and step > 0 and (step % 20 == 0):
             try:
