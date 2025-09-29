@@ -2335,7 +2335,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 all_student_hidden_states = torch.stack(outputs.hidden_states, dim=0) # [num_layer, batch_size, seq_len, dim]
                 for b in range(batch_size):
                     student_hidden_states = all_student_hidden_states[:, b, alignment_poss[b], :] 
-                    total_align_loss += alignment_loss(
+                    total_align_loss += (
                                             teacher_hidden_states_for_alignment[b], # [num_layer, num_align_in_a_seg, dim]
                                             student_hidden_states, # [num_layer, num_align_in_a_seg, dim]
                                         )
