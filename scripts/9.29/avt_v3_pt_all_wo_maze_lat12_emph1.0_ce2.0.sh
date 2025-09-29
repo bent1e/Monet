@@ -3,7 +3,7 @@ export NCCL_IB_DISABLE=0
 export NCCL_IB_GID_INDEX=3
 export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_9
 
-LATENT_SIZE=4
+LATENT_SIZE=12
 CE_EMPHASIZE_FACTOR=2.0
 ALIGN_VISION_LATENT_LOSS_WEIGHT=0.0001
 EMPHASIZE_LATENT_WEIGHT=1.0
@@ -35,4 +35,22 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --align_vision_latent_loss_weight ${ALIGN_VISION_LATENT_LOSS_WEIGHT} \
   --emphasize_latent_weight ${EMPHASIZE_LATENT_WEIGHT}
 
-  
+
+src=/mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_v3/${SAVE_CKPT}
+output=/mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_v3/${SAVE_CKPT}.zip
+include_subdir=False
+
+if [ -z "$src" ] || [ -z "$output" ] || [ -z "$include_subdir" ]; then
+    echo "用法: $0 <source_folder> <output_zip> <include_subdir:True|False>"
+    exit 1
+fi
+
+if [ "$include_subdir" = "True" ]; then
+    # 压缩整个目录（包含子目录），只保留最后一级目录名
+    (cd "$(dirname "$src")" && zip -r "$output" "$(basename "$src")")
+else
+    # 只压缩目录下的文件，不包含子目录，保留最后一级目录名
+    (cd "$(dirname "$src")" && zip "$output" "$(basename "$src")"/*)
+fi
+
+python /mmu_vcg_ssd/shiyang06/Tool/huggingface.py --item $output
