@@ -223,8 +223,8 @@ examples_pool_exact = {
         "## Your output: In which year did the depicted event, according to the painting, take place?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1><observation>1790</observation><END_STEP_1>\n\n\n"
         "## Input: Are the bikes being ridden on a clean or dirty surface?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>The bikes are being ridden on a muddy, dirty surface.<END_STEP_1>\n\n"
         "## Your output: Are the bikes being ridden on a clean or dirty surface?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>The bikes are being ridden on a <observation>muddy, dirty surface.</observation><END_STEP_1>\n\n\n"
-        "## Input: How is the phone being held by the woman who is taking a photo?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>The phone is being held sideways by the woman.<END_STEP_1>\n\n"
-        "## Input: How is the phone being held by the woman who is taking a photo?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>The phone is being held <observation>sideways by the woman.</observation><END_STEP_1>\n\n"
+        "## Input: Can you tell me what the two people standing by the stove are wearing?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>Yes, one person is wearing a gray shirt and the other is wearing a black shirt.<END_STEP_1>\n\n"
+        "## Your output: Can you tell me what the two people standing by the stove are wearing?<STEP_0><abs_vis_token></abs_vis_token><END_STEP_0>\n<STEP_1>Yes, one person is wearing <observation>a gray shirt</observation> and the other is wearing <observation>a black shirt</observation>.<END_STEP_1>\n\n\n"
     )},
     "Visual_CoT_v7w": (
         "## Input: <STEP_0><abs_vis_token></abs_vis_token><END_STEP_0><FINAL_STEP>To determine where the racquet is, let's analyze the image:\n\n1. The image shows a person holding a tennis racquet.\n2. The racquet is clearly visible in the person's right hand.\n\nGiven this information, the correct answer is:\n\n\\boxed{C}<FINAL_STEP>\n\n"

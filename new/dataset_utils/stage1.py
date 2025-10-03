@@ -1298,7 +1298,10 @@ def run_policy_batch(
                 j += 1
                 text = o.outputs[0].text.strip() if o.outputs else ""
                 raw_outs.append(text)
-                extr_outs.append(extract_boxed_answer(text))
+                extracted_answer = extract_boxed_answer(text)
+                if extracted_answer == "Invalid prediction.":
+                    extracted_answer = text
+                extr_outs.append(extracted_answer)
 
         # ---------- 5. 追加到总结果 ----------
         raw_outs_all.extend(raw_outs)
