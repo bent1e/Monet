@@ -75,6 +75,57 @@ except Exception:  # when executed as a script without package context
 from transformers import AutoProcessor, AutoTokenizer  # trust_remote_code needed
 import multiprocessing as mp
 
+# ========== Robustness utilities ==========
+import time
+import signal
+import threading
+
+# Global flag for graceful shutdown
+_EXIT_REQUESTED = threading.Event()
+
+def _on_signal(signum, frame):
+    # Set a global flag; loops will stop after the current safe point.
+    _EXIT_REQUESTED.set()
+
+# Register common signals (logout/kill -15 etc.)
+try:
+    signal.signal(signal.SIGHUP, _on_signal)
+except Exception:
+    pass  # Not all platforms support SIGHUP
+try:
+    signal.signal(signal.SIGTERM, _on_signal)
+except Exception:
+    pass
+
+def generate_with_retry(engine, kept_inputs, sampling_params, *,
+                        max_retries=3, base_sleep=1.0, use_tqdm=False,
+                        reinit_fn=None):
+    """
+    Call engine.generate with retries and optional re-initialization.
+    If reinit_fn is provided, it will be called once upon the first failure to rebuild the engine.
+    """
+    attempt = 0
+    last_err = None
+    while attempt <= max_retries and not _EXIT_REQUESTED.is_set():
+        try:
+            return engine.generate(kept_inputs, sampling_params=sampling_params, use_tqdm=use_tqdm)
+        except Exception as e:
+            last_err = e
+            # Exponential backoff
+            sleep_t = base_sleep * (2 ** attempt)
+            print(f"[generate_with_retry] attempt {attempt+1}/{max_retries+1} failed: {e}. sleep {sleep_t:.1f}s")
+            time.sleep(sleep_t)
+            # Try to re-init once on the first failure if a reinit function is provided
+            if attempt == 0 and reinit_fn is not None:
+                try:
+                    print("[generate_with_retry] re-initializing engine...")
+                    engine = reinit_fn()
+                except Exception as ee:
+                    print(f"[generate_with_retry] re-init failed: {ee}")
+        attempt += 1
+    raise RuntimeError(f"generate_with_retry exceeded retries. last error: {last_err}")
+
+
 # =============================
 # 数据集路径映射 (按用户环境)
 # =============================
@@ -1085,6 +1136,7 @@ def _dp_worker_run(
     policy_model_path: str,
     tp: int,
     batch_size: int = 8192,
+    gpu_memory_utilization: float = 0.9,
 ) -> Tuple[List[Optional[str]], List[Optional[str]], List[bool]]:
     """单个进程在指定 GPU 组上运行一个 vLLM 实例并完成一个分片的推理。"""
     import os as _os
@@ -1101,13 +1153,19 @@ def _dp_worker_run(
     # 每个 worker 独立加载 tokenizer/processor 与模型
     _tokenizer = _AutoTokenizer.from_pretrained(policy_model_path, trust_remote_code=True)
     _processor = _AutoProcessor.from_pretrained(policy_model_path)
-    _policy_mllm, _sampling_params = _vllm_mllm_init(policy_model_path, tp=tp)
+    _policy_mllm, _sampling_params = _vllm_mllm_init(
+        policy_model_path, tp=tp, gpu_memory_utilization=gpu_memory_utilization
+    )
     try:
         raw_outs_all: List[Optional[str]] = []
         extr_outs_all: List[Optional[str]] = []
         keep_mask_all: List[bool] = []
 
+        import time as _time
         for start in range(0, len(conv_list), batch_size):
+            if _EXIT_REQUESTED.is_set():
+                print("[GracefulExit] Exit requested. Stopping before next batch.")
+                break
             sub_convs = conv_list[start : start + batch_size]
             inputs = _proc_from_msgs(sub_convs, _processor)
 
@@ -1120,7 +1178,35 @@ def _dp_worker_run(
 
             kept_inputs = [inp for inp, k in zip(inputs, keep_mask) if k]
             if kept_inputs:
-                outputs = _policy_mllm.generate(kept_inputs, sampling_params=_sampling_params, use_tqdm=True)
+                t0 = _time.time()
+                
+                def _reinit_engine():
+                    # Recreate tokenizer/processor is not necessary here; only engine.
+                    # Note: keep the same tp/gpu_memory_utilization for this worker's device set.
+                    _vllm_kill_model(_policy_mllm)
+                    eng, _ = _vllm_mllm_init(policy_model_path, tp=tp, gpu_memory_utilization=gpu_memory_utilization)
+                    return eng
+                try:
+                    outputs = generate_with_retry(
+                        _policy_mllm,
+                        kept_inputs,
+                        _sampling_params,
+                        max_retries=3,            # could be parameterized by args
+                        base_sleep=1.0,
+                        use_tqdm=False,
+                        reinit_fn=_reinit_engine  # rebuild engine once on first failure
+                    )
+                except Exception as e:
+                    print(f"[Stage1-DP] generate failed after retries on sub-batch {start}:{start+batch_size} -> {e}")
+                    outputs = []
+                dt = _time.time() - t0
+                if dt > 600:
+                    # 记录异常长耗时的子批调试信息
+                    try:
+                        avg_len = int(sum(tok_lens or []) / max(1, len(tok_lens or [])))
+                    except Exception:
+                        avg_len = -1
+                    print(f"[Stage1-DP] slow sub-batch took {dt:.1f}s, kept={len(kept_inputs)}, avg_tokens≈{avg_len}")
             else:
                 outputs = []
 
@@ -1135,7 +1221,10 @@ def _dp_worker_run(
                     j += 1
                     text = o.outputs[0].text.strip() if o.outputs else ""
                     raw_outs.append(text)
-                    extr_outs.append(_extract_boxed_answer(text))
+                    extracted_answer = _extract_boxed_answer(text)
+                    if extracted_answer == "Invalid prediction.":
+                        extracted_answer = text
+                    extr_outs.append(extracted_answer)
 
             raw_outs_all.extend(raw_outs)
             extr_outs_all.extend(extr_outs)
@@ -1158,11 +1247,12 @@ def _dp_worker_entry(
     tp: int,
     batch_size: int,
     shard_idx: int,
+    gpu_memory_utilization: float,
 ):
     """进程入口：运行分片并将结果回传到队列。"""
     try:
         raw, extr, keep = _dp_worker_run(
-            device_ids, conv_list, max_model_len, policy_model_path, tp, batch_size
+            device_ids, conv_list, max_model_len, policy_model_path, tp, batch_size, gpu_memory_utilization
         )
         queue.put((shard_idx, raw, extr, keep))
     except Exception:
@@ -1182,6 +1272,7 @@ def run_policy_batch(
     dp_device_groups: Optional[List[List[int]]] = None,
     policy_model_path: Optional[str] = None,
     tp: int = 1,
+    gpu_memory_utilization: float = 0.9,
 ) -> Tuple[List[Optional[str]], List[Optional[str]], List[bool]]:
     """支持两种模式：
     - 单引擎批推理（原逻辑）
@@ -1219,7 +1310,7 @@ def run_policy_batch(
                 continue
             p = ctx.Process(
                 target=_dp_worker_entry,
-                args=(queue, devs, shard, max_model_len, policy_model_path, tp, batch_size, shard_idx),
+                args=(queue, devs, shard, max_model_len, policy_model_path, tp, batch_size, shard_idx, gpu_memory_utilization),
             )
             p.daemon = False
             p.start()
@@ -1263,6 +1354,9 @@ def run_policy_batch(
 
     # 按 batch_size 迭代
     for start in range(0, len(conv_list), batch_size):
+        if _EXIT_REQUESTED.is_set():
+            print("[GracefulExit] Exit requested. Stopping before next batch.")
+            break
         sub_convs = conv_list[start : start + batch_size]
 
         # ---------- 1. 构建输入 ----------
@@ -1280,8 +1374,13 @@ def run_policy_batch(
         # 仅保留未被过滤的样本传入模型，减少无谓推理
         kept_inputs = [inp for inp, k in zip(inputs, keep_mask) if k]
         if kept_inputs:
-            outputs = policy_mllm.generate(
-                kept_inputs, sampling_params=sampling_params, use_tqdm=True
+            outputs = generate_with_retry(
+                policy_mllm,
+                kept_inputs,
+                sampling_params,
+                max_retries=3,          # will be overridden by args in caller if needed
+                base_sleep=1.0,
+                use_tqdm=False          # reduce host-side overhead
             )
         else:
             outputs = []
@@ -1366,6 +1465,24 @@ def main():
         default=2,
         help="policy_mllm 模型的 tensor parallel size",
     )
+    parser.add_argument(
+        "--groups_per_gpu",
+        type=int,
+        default=1,
+        help="每张 GPU 上启动多少个并行的 policy 引擎进程（>1 需要下调 --gpu_memory_utilization 与 --policy_batch，风险自担）",
+    )
+    parser.add_argument(
+        "--gpu_memory_utilization",
+        type=float,
+        default=0.9,
+        help="vLLM 估算可用显存占比（单进程）。与 --groups_per_gpu 相乘不应超过 0.95",
+    )
+    parser.add_argument(
+        "--policy_batch",
+        type=int,
+        default=256,
+        help="policy 推理的微批大小（每次 generate 的输入条数）；减小可避免超大批次导致长尾",
+    )
     parser.add_argument("--judge_mode", choices=["llm", "quick", "data_spec", "api"], nargs="+")
     # API judging related
     parser.add_argument("--api_name", type=str, default=None, choices=["gemini-2.5-pro", "deepseek-chat"], help="External API judge model name")
@@ -1373,6 +1490,9 @@ def main():
     parser.add_argument("--api_temperature", type=float, default=0.0, help="Temperature for API judge calls")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path for dataset, if not set, use the default from DEFAULT_DATASETS")
     parser.add_argument("--dataset_images_root", type=str, default=None, help="Root path for dataset images, if not set, use the default from DEFAULT_DATASETS")
+    parser.add_argument("--max-retries", type=int, default=3, help="Max retries for vLLM generate()")
+    parser.add_argument("--retry-sleep", type=float, default=1.0, help="Base sleep seconds for backoff between retries")
+
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
@@ -1417,14 +1537,27 @@ def main():
     # 设备划分：根据 devices 与 tp 自动计算数据并行分组
     devices_list = [int(x) for x in args.devices.split(",") if x.strip() != ""]
     tp = args.policy_mllm_tensor_parallel_size
-    dp_degree = len(devices_list) // tp if tp > 0 else 0
-    use_dp = dp_degree > 1
-    dp_groups = [devices_list[i * tp : (i + 1) * tp] for i in range(dp_degree)] if use_dp else []
+    base_degree = len(devices_list) // tp if tp > 0 else 0
+    base_groups = [devices_list[i * tp : (i + 1) * tp] for i in range(base_degree)] if base_degree > 0 else []
+    # 允许同一张卡上开多个 worker（重复分组），以提升利用率。谨慎使用！
+    if args.groups_per_gpu > 1 and base_groups:
+        dp_groups = []
+        for _ in range(args.groups_per_gpu):
+            dp_groups.extend(base_groups)
+    else:
+        dp_groups = base_groups
+    use_dp = len(dp_groups) > 1
+    if args.groups_per_gpu > 1:
+        eff_util = args.gpu_memory_utilization * args.groups_per_gpu
+        if eff_util > 0.95:
+            print(f"[WARN] groups_per_gpu({args.groups_per_gpu}) * gpu_memory_utilization({args.gpu_memory_utilization}) = {eff_util:.2f} > 0.95，可能 OOM 或抖动。请下调其中之一。")
 
     if not use_dp:
         print("[Init policy_mllm]")
         policy_mllm, sampling_params = vllm_mllm_init(
-            args.policy_model_path, tp=args.policy_mllm_tensor_parallel_size
+            args.policy_model_path,
+            tp=args.policy_mllm_tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
 
     # ------------------ 加载原始数据 ------------------
@@ -1528,6 +1661,8 @@ def main():
             dp_device_groups=dp_groups,
             policy_model_path=args.policy_model_path,
             tp=tp,
+            batch_size=args.policy_batch,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
     else:
         raw_outs, extr_outs, keep_mask = run_policy_batch(
@@ -1537,6 +1672,8 @@ def main():
             processor,
             tokenizer,
             max_model_len=args.max_model_len,
+            batch_size=args.policy_batch,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
         vllm_kill_model(policy_mllm)  #
     # ------------------ 判分并写出 ------------------

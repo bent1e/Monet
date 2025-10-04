@@ -64,7 +64,8 @@ def vllm_mllm_init(mllm_dir, tp=4, gpu_memory_utilization=0.95):
             #"do_rescale": False,
             #"use_fast": True
         },
-        enable_sleep_mode=True
+        enable_sleep_mode=True,
+        enable_chunked_prefill=True,
     )
     engine_args = asdict(engine_args)
     mllm = LLM(

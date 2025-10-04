@@ -149,16 +149,15 @@ def run_batch_step(
 
 
 # ---------------- DP helpers -------------------------
-def _dp_stage2_worker_entry(
-    queue,
+def _dp_stage2_persistent_worker(
+    task_queue,
+    result_queue,
     device_ids: List[int],
-    recs: List[Dict[str, Any]],
-    step_idx: int,
     model_path: str,
     tp: int,
     token_limit: int,
-    shard_idx: int,
 ):
+    """Persistent worker: load model once and serve multiple step tasks."""
     try:
         import os as _os
         from transformers import AutoTokenizer as _AutoTokenizer, AutoProcessor as _AutoProcessor
@@ -171,73 +170,46 @@ def _dp_stage2_worker_entry(
         proc = _AutoProcessor.from_pretrained(model_path)
         model, sampling = _vllm_mllm_init(model_path, tp=tp)
         try:
-            preds = run_batch_step(recs, step_idx, model, proc, tok, token_limit, sampling)
+            while True:
+                msg = task_queue.get()
+                if not msg:
+                    continue
+                cmd = msg[0]
+                if cmd == "STOP":
+                    break
+                elif cmd == "RUN":
+                    _, step_idx, shard_idx, recs = msg
+                    try:
+                        preds = run_batch_step(recs, step_idx, model, proc, tok, token_limit, sampling)
+                    except Exception:
+                        import traceback as _tb
+                        _tb.print_exc()
+                        preds = [None] * len(recs)
+                    result_queue.put((step_idx, shard_idx, preds))
         finally:
             try:
                 _vllm_kill_model(model)
             except Exception:
                 pass
-        queue.put((shard_idx, preds))
     except Exception:
         import traceback as _tb
         _tb.print_exc()
-        queue.put((shard_idx, [None] * len(recs)))
 
 
-def run_batch_step_dp(
-    recs: List[Dict[str, Any]],
-    step_idx: int,
-    dp_device_groups: List[List[int]],
-    model_path: str,
-    tp: int,
-    token_limit: int,
-) -> List[Optional[str]]:
-    num_workers = len(dp_device_groups)
-    n = len(recs)
+def _split_shards(items: List[Any], num_shards: int) -> List[List[Any]]:
+    n = len(items)
     if n == 0:
-        return []
-    # contiguous split
-    shard_sizes = [(n + i) // num_workers for i in range(num_workers)]
-    total_assigned = sum(shard_sizes)
-    if total_assigned != n:
-        shard_sizes[0] += (n - total_assigned)
-    shards = []
+        return [[] for _ in range(num_shards)]
+    sizes = [(n + i) // num_shards for i in range(num_shards)]
+    total = sum(sizes)
+    if total != n:
+        sizes[0] += (n - total)
+    shards: List[List[Any]] = []
     idx = 0
-    for sz in shard_sizes:
-        shards.append(recs[idx : idx + sz])
+    for sz in sizes:
+        shards.append(items[idx : idx + sz])
         idx += sz
-
-    ctx = mp.get_context("spawn")
-    queue = ctx.Queue()
-    procs: List[mp.Process] = []
-    for shard_idx, (devs, shard) in enumerate(zip(dp_device_groups, shards)):
-        if not shard:
-            queue.put((shard_idx, []))
-            continue
-        p = ctx.Process(
-            target=_dp_stage2_worker_entry,
-            args=(queue, devs, shard, step_idx, model_path, tp, token_limit, shard_idx),
-        )
-        p.daemon = False
-        p.start()
-        procs.append(p)
-
-    received = 0
-    outputs = [None] * num_workers  # type: ignore
-    while received < num_workers:
-        shard_idx, preds = queue.get()
-        outputs[shard_idx] = preds
-        received += 1
-
-    for p in procs:
-        p.join()
-
-    ret: List[Optional[str]] = []
-    for out in outputs:
-        if out is None:
-            continue
-        ret.extend(out)
-    return ret
+    return shards
 
 
 # ---------- main -------------------------------------------------------------
@@ -332,24 +304,68 @@ def flush_steps(
     tp: int = 1,
 ):
     max_steps = max(len(st["rec"]["helpers"]) for st in states)
-    for step in range(max_steps):
-        batch_recs = [st["rec"] for st in states]
-        if use_dp:
-            preds = run_batch_step_dp(
-                batch_recs,
-                step,
-                dp_groups or [],
-                model_path=model_path,
-                tp=tp,
-                token_limit=token_limit,
+    if use_dp:
+        # Persistent DP workers: keep engines alive across all steps in this flush
+        num_workers = len(dp_groups or [])
+        if not dp_groups or num_workers == 0:
+            return
+        ctx = mp.get_context("spawn")
+        task_q = ctx.Queue()
+        res_q = ctx.Queue()
+        procs: List[mp.Process] = []
+        for devs in (dp_groups or []):
+            p = ctx.Process(
+                target=_dp_stage2_persistent_worker,
+                args=(task_q, res_q, devs, model_path, tp, token_limit),
             )
-        else:
+            p.daemon = False
+            p.start()
+            procs.append(p)
+
+        try:
+            for step in range(max_steps):
+                batch_recs = [st["rec"] for st in states]
+                shards = _split_shards(batch_recs, num_workers)
+                # dispatch one task per worker (even if empty) to keep counts aligned
+                for shard_idx, shard in enumerate(shards):
+                    task_q.put(("RUN", step, shard_idx, shard))
+
+                # collect
+                outputs: List[Optional[List[Optional[str]]]] = [None] * num_workers
+                received = 0
+                while received < num_workers:
+                    step_r, shard_idx_r, preds_r = res_q.get()
+                    if step_r != step:
+                        # skip out-of-order (shouldn't happen)
+                        continue
+                    outputs[shard_idx_r] = preds_r
+                    received += 1
+
+                # merge in shard order
+                preds: List[Optional[str]] = []
+                for part in outputs:
+                    if part is None:
+                        continue
+                    preds.extend(part)
+
+                for st, p in zip(states, preds):
+                    if step < len(st["preds"]):
+                        st["preds"][step] = p
+        finally:
+            # stop workers
+            for _ in procs:
+                task_q.put(("STOP",))
+            for p in procs:
+                p.join()
+    else:
+        for step in range(max_steps):
+            batch_recs = [st["rec"] for st in states]
             preds = run_batch_step(
                 batch_recs, step, model, proc, tok, token_limit, sampling_params
             )
-        for st, p in zip(states, preds):
-            if step < len(st["preds"]):
-                st["preds"][step] = p
+            for st, p in zip(states, preds):
+                if step < len(st["preds"]):
+                    st["preds"][step] = p
 
     for st in states:
         out = {

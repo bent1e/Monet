@@ -14,7 +14,6 @@ python -m dataset_utils.stage1 \
     --policy-model-path /ytech_m2v5_hdd/workspace/kling_mm/Models/Qwen2.5-VL-7B-Instruct \
     --devices 0,1,2,3,4,5,6,7 \
     --policy_mllm_tensor_parallel_size 1 \
-    --limit 30 \
     --start-id 0 \
     --judge_mode data_spec api \
     --api_name gemini-2.5-pro \
@@ -26,8 +25,7 @@ python -m dataset_utils.stage2_infer \
     --model-path /ytech_m2v5_hdd/workspace/kling_mm/Models/Qwen2.5-VL-72B-Instruct \
     --strong_mllm_tensor_parallel_size 4 \
     --devices 0,1,2,3,4,5,6,7 \
-    --token-limit 8192 \
-    --max-samples 30
+    --token-limit 8192
 
 python -m dataset_utils.stage2_judge \
     --infer-file /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Visual_CoT/stage2_strong_inferred_1.jsonl \
@@ -35,7 +33,6 @@ python -m dataset_utils.stage2_judge \
     --out /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Visual_CoT/stage2_strong_judged_1.jsonl \
     --judge_mode data_spec api \
     --devices 0,1,2,3,4,5,6,7 \
-    --max_samples 30 \
     --api_name gemini-2.5-pro \
     --api_max_workers 64
 
