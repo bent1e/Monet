@@ -1549,7 +1549,7 @@ class CustomTrainerAVT_V5_Stage1(SFTTrainer):
         # Ensure training forward does NOT request attentions (prevents checkpoint recompute mismatch)
         inputs.pop('output_attentions', None)
         inputs.pop('attn_analysis', None)
-        inputs.pop('attention_mask_4d')
+        #inputs.pop('attention_mask_4d')
         teacher_reps = load_offline_tensor(self.args.teacher_reps_dir, batch_metadata=inputs['metadata'], 
         alignment_layer=self.args.alignment_layer)
         inputs['alignment_poss'] = inputs['observation_poss']
@@ -1561,7 +1561,7 @@ class CustomTrainerAVT_V5_Stage1(SFTTrainer):
             )
         alignment_loss = teacher_output.loss_dict['alignment']
         if self.args.emphasize_latent_weight != 1.0:
-            latent_only_loss = compute_latents_only_loss(outputs.ce_patch_vec, self.args.alignment_weight *alignment_loss)
+            latent_only_loss = compute_latents_only_loss(outputs.ce_patch_vec, self.args.alignment_weight * alignment_loss)
             loss = self.args.emphasize_latent_weight * latent_only_loss + teacher_ce_loss
         else:
             loss = teacher_ce_loss + self.args.alignment_weight * alignment_loss

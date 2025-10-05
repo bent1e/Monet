@@ -25,7 +25,7 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.main \
     "./new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000.json" \
   --log_file "./log.txt" \
   --load_model_path /home/dids/shiyang/checkpoints/after9.28/10.1_avt_sft_wo_maze_ce2.0/10.1_avt_sft_wo_maze_ce2.0 \
-  --save_model_path /home/dids/shiyang/checkpoints/avt_v4/${SAVE_CKPT} \
+  --save_model_path /home/dids/shiyang/checkpoints/avt_v5/${SAVE_CKPT} \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --latent_size ${LATENT_SIZE} \
   --alignment_weight ${ALIGNMENT_WEIGHT} \

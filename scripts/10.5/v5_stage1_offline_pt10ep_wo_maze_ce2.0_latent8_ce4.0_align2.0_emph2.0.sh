@@ -30,7 +30,7 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
     "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000.json" \
   --log_file "./log.txt" \
   --load_model_path /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_sft/${TEACHER} \
-  --save_model_path /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_5/${SAVE_CKPT} \
+  --save_model_path /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/avt_v5/${SAVE_CKPT} \
   --dataset_root /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --wandb_name ${SAVE_CKPT} \
