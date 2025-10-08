@@ -9,4 +9,4 @@ python -m dataset_utils.api_anno_from_raw \
     --dataset-name Zebra_CoT_rpm \
     --limit 5 \
     --out-root /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual \
-    --api_model_name deepseek-chat
+    --api_model_name gemini-2.5-pro
