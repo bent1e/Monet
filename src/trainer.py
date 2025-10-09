@@ -1395,10 +1395,11 @@ class CustomTrainerAVT_V4(SFTTrainer):
             with torch.no_grad():
                 teacher_outputs = model(**inputs)
                 teacher_reps = teacher_outputs.hidden_states
-            #teacher_ce_loss = teacher_outputs.loss_dict.get('ce', None)
-            teacher_ce_loss = None
+            teacher_ce_loss = teacher_outputs.loss_dict.get('ce', None)
+            #teacher_ce_loss = None
         else:       
             # Try to load precomputed teacher latents
+            teacher_ce_loss = None
             teacher_reps = load_offline_tensor(self.teacher_reps_dir, batch_metadata=inputs['metadata'], alignment_layer=self.args.alignment_layer)
 
 
