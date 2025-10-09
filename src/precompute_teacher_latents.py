@@ -154,7 +154,7 @@ def collate_fn_precompute_teacher_latents(examples):
     
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
-        image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=1000*28*28, per_img_max_pixels=500*28*28)
     elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs)
 

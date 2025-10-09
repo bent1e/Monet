@@ -1638,29 +1638,12 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         self.student_ce_loss_cum = 0.0        # cumulative student CE loss
         self.student_ce_loss_steps = 0
 
-
-
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
-        Compute training loss for AVT v2 stage2 with optional cached teacher latents.
+        Compute training loss for AVT v5 stage2 with optional cached teacher latents.
         """
         # Try to load precomputed teacher latents
-        teacher_latents = None
-        batch_metadata = inputs['metadata']
-
-        latents_list = []
-        for metadata in batch_metadata:
-            dataset_name = metadata['dataset_name']
-            sample_id = metadata['sample_id']
-            metadata_info = f"{self.args.alignment_layer}_{dataset_name}_{sample_id}"
-            path = os.path.join(self.teacher_latent_dir, f"latent_{metadata_info}.pt")
-            if not os.path.isfile(path):
-                latents_list = []
-                raise RuntimeError(f"Missing teacher latent file: {path}")
-            data = torch.load(path, map_location='cpu')
-            latents_list.append(data['latent'].detach())
-        if batch_metadata is not None and len(latents_list) == len(batch_metadata):
-            teacher_latents = latents_list
+        teacher_latents = load_offline_tensor(self.teacher_reps_dir, batch_metadata=inputs['metadata'], alignment_layer=self.args.alignment_layer)
 
         # Student alignment forward
         inputs['latent_mode'] = True
@@ -1673,22 +1656,20 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         inputs['alignment_poss'] = inputs['student_alignment_poss']
         inputs['teacher_hidden_states_for_alignment'] = teacher_latents
         model.gradient_checkpointing_disable()
-        inputs['loss_type'] = ['alignment']
-        inputs['output_latent_embeds'] = False
-        (_, student_outputs) = super().compute_loss(
-            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
-        )
-        alignment_loss = student_outputs.loss_dict['alignment']
+        inputs['loss_type'] = []
+        inputs['output_hidden_states'] = False
+        student_outputs_latent = model(**inputs)
+        
 
         # Student CE forward
         inputs['latent_mode'] = False
         inputs['labels'] = inputs['student_labels']
-        inputs['ce_patch_pos'] = student_outputs.ce_patch_pos
-        inputs['ce_patch_vec'] = student_outputs.ce_patch_vec
+        inputs['ce_patch_pos'] = student_outputs_latent.ce_patch_pos
+        inputs['ce_patch_vec'] = student_outputs_latent.ce_patch_vec
         inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
         inputs['ce_emphasize_poss'] = inputs['observation_poss']
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        inputs['loss_type'] = ['ce']
+        inputs['loss_type'] = ['ce', 'alignment']
         inputs['compute_emphasize_acc'] = True
         if 'student_attention_mask_4d' in inputs:
             inputs['attention_mask_4d'] = inputs.pop('student_attention_mask_4d')
@@ -1698,8 +1679,8 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         if getattr(student_outputs, 'mean_emphasize_acc', None) is not None:
             self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
             self.observation_token_acc_step += 1
-        
-        alignment_loss = alignment_loss.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
+        alignment_loss = student_outputs.loss_dict['alignment']
+
         if isinstance(self.weight, torch.Tensor):
             self.weight = self.weight.to(student_ce_loss.device, dtype=student_ce_loss.dtype)
         else:
@@ -1724,16 +1705,6 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         self.student_ce_loss_cum += outputs_student_loss
         self.student_ce_loss_steps += 1
 
-        '''if self.is_main_process:
-            with open(self.loss_log_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    self.state.global_step,
-                    self.state.epoch,
-                    float(loss.detach().item()),
-                    outputs_student_loss,
-                    float(alignment_loss.detach().item()),
-                ])'''
         return (loss, None) if return_outputs else loss
     
     def log(self, logs: dict, start_time: float | None = None):

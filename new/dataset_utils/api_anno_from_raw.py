@@ -934,7 +934,7 @@ def parse_zebra_cot(
         txt = re.sub(r'<image_start>\[problem_image_\d+\]<image_end>', '', txt)
         return txt
     
-    print(sample)
+    #print(sample)
     if not sample.get("problem_image_2", None):
         main_img = sample["problem_image_1"]
         question = _remove_question_img_pad(sample["Question"])
@@ -1119,13 +1119,13 @@ def save_images_for_sample(
         main_path = []
         for i, img in enumerate(main_img):
             save_p = out_img_dir / f"{sid}_0_{i}.jpg"
-            p = os.path.join(dataset_name, f"{sid}_0_{i}.jpg")
+            p = os.path.join(dataset_name, "images", f"{sid}_0_{i}.jpg")
             main_path.append(p)
             img.save(save_p)
     else:
         save_path = out_img_dir / f"{sid}_0.jpg"
         main_img.save(save_path)
-        main_img = os.path.join(dataset_name, f"{sid}_0.jpg")
+        main_path = os.path.join(dataset_name, "images", f"{sid}_0.jpg")
     paths.append(main_path)
     # helpers
     idx = 1
@@ -1136,7 +1136,7 @@ def save_images_for_sample(
             continue
         save_p = out_img_dir / f"{sid}_{idx}.jpg"
         img.save(save_p)
-        p = os.path.join(dataset_name, f"{sid}_{idx}.jpg")
+        p = os.path.join(dataset_name, "images", f"{sid}_{idx}.jpg")
         paths.append(p)
         idx += 1
     return paths  # [main_path, helper1_path_orNone, ...]
@@ -1466,7 +1466,7 @@ def main():
                 h["image_path"] = None
             # 释放 PIL 以节省内存
             h["image"] = None
-        print(rec)
+        #print(rec)
         finals.append(make_final_cot(s1_rec, steps_al))
 
         sid += 1
