@@ -1621,16 +1621,9 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         self.weight = self.args.alignment_weight
         self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
         # Where to read precomputed teacher latents
-        base_save = getattr(self.args, 'output_dir', './checkpoints')
         self.teacher_latent_dir = getattr(self.args, 'teacher_latent_dir', None)
         if not self.teacher_latent_dir:
-            # fall back to user-specified save_model_path-like; use output_dir parent by default
-            self.teacher_latent_dir = os.path.join(base_save if base_save else './checkpoints', 'teacher_latents')
-        # 仅 rank‑0 进程写文件，防止多卡重复
-        self.is_main_process = (
-            not torch.distributed.is_initialized()
-            or torch.distributed.get_rank() == 0
-        )
+            raise ValueError("teacher_latent_dir must be specified for AVT_V5_Stage2")
 
         self.observation_token_acc = 0.
         self.observation_token_acc_step = 0
@@ -1691,7 +1684,7 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         # Periodic light GC on main process
         del student_outputs
         step = int(getattr(self.state, 'global_step', 0) or 0)
-        if self.is_main_process and step > 0 and (step % 20 == 0):
+        if step > 0 and (step % 20 == 0):
             try:
                 gc.collect()
                 torch.cuda.empty_cache()

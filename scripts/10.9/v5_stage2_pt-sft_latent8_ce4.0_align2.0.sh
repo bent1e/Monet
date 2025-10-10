@@ -53,5 +53,5 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --latent_size ${LATENT_SIZE} \
   --alignment_weight ${ALIGNMENT_WEIGHT} \
   --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
-  --teacher_reps_dir /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/precomputed_teacher_reps/${TEACHER} \
+  --teacher_latent_dir /mmu_vcg_ssd/shiyang06/Project/Latent_Think/checkpoint/precomputed_teacher_reps/${TEACHER} \
   --alignment_layer all_layers
