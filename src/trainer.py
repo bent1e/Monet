@@ -41,7 +41,7 @@ def compute_latents_only_loss(latents, loss_for_latents):
     proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
     return proxy_loss
 
-def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers"):
+def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers", rep_type="rep"):
     teacher_reps = None
     teacher_ce_loss = None
     latents_list = []
@@ -49,7 +49,7 @@ def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers"
         dataset_name = metadata['dataset_name']
         sample_id = metadata['sample_id']
         metadata_info = f"{alignment_layer}_{dataset_name}_{sample_id}"
-        path = os.path.join(tensor_dir, f"rep_{metadata_info}.pt")
+        path = os.path.join(tensor_dir, f"{rep_type}_{metadata_info}.pt")
         if not os.path.isfile(path):
             latents_list = []
             raise RuntimeError(f"Missing teacher latent file: {path}")
@@ -1644,7 +1644,7 @@ class CustomTrainerAVT_V5_Stage2(SFTTrainer):
         Compute training loss for AVT v5 stage2 with optional cached teacher latents.
         """
         # Try to load precomputed teacher latents
-        teacher_latents = load_offline_tensor(self.teacher_latent_dir, batch_metadata=inputs['metadata'], alignment_layer=self.args.alignment_layer)
+        teacher_latents = load_offline_tensor(self.teacher_latent_dir, batch_metadata=inputs['metadata'], alignment_layer=self.args.alignment_layer, rep_type="latent")
 
         # Student alignment forward
 
