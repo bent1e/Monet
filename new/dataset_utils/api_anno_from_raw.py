@@ -2,39 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 conda activate mirage
-cd /data1/qxwang/codes/abstract-visual-token/new
+cd /mmu_vcg_ssd/shiyang06-temp/Latent_Think/abstract-visual-token/new
 python -m dataset_utils.api_anno_from_raw \
-    --dataset-name Zebra_CoT_arc_agi \
+    --dataset-name HELIX \
     --limit 5 \
     --api_model_name deepseek-chat
 
-conda activate mirage
-cd /data1/qxwang/codes/abstract-visual-token/new
-python -m dataset_utils.api_anno_from_raw \
-    --dataset-name Zebra_CoT_checker \
-    --limit 5 \
-    --api_model_name deepseek-chat
-
-conda activate mirage
-cd /data1/qxwang/codes/abstract-visual-token/new
-python -m dataset_utils.api_anno_from_raw \
-    --dataset-name Zebra_CoT_connect_four \
-    --limit 5 \
-    --api_model_name deepseek-chat
-
-conda activate mirage
-cd /data1/qxwang/codes/abstract-visual-token/new
-python -m dataset_utils.api_anno_from_raw \
-    --dataset-name Zebra_CoT_rpm \
-    --limit 5 \
-    --api_model_name deepseek-chat
-
-conda activate mirage
-cd /data1/qxwang/codes/abstract-visual-token/new
-python -m dataset_utils.api_anno_from_raw \
-    --dataset-name Zebra_CoT_tetris \
-    --limit 5 \
-    --api_model_name deepseek-chat
 
 """
 
@@ -54,6 +27,7 @@ import concurrent.futures as cf
 from AAA_vllm_toolkit.api import get_api_response          # type: ignore
 from dataset_utils.prompts import examples_pool_exact            # type: ignore
 import time
+import pdb
 # ------------------------------
 # AAA 本地工具 (按用户环境)
 # ------------------------------
@@ -160,6 +134,10 @@ DEFAULT_DATASETS = {
     },
     "Zebra_CoT_tetris": {
         "dataset_path": "/ytech_m2v5_hdd/workspace/kling_mm/Datasets/Zebra-CoT/Visual Logic & Strategic Games - Tetris",
+        "dataset_images_root": "",
+    },
+    "HELIX": {
+        "dataset_path": "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/MM-HELIX-100K",
         "dataset_images_root": "",
     },
 }
@@ -1091,6 +1069,77 @@ def parse_vts(
         "helpers": helpers,
     }
 
+
+def parse_helix(
+    sample: Dict[str, Any], dataset_images_root: Path
+) -> Optional[Dict[str, Any]]:
+    pdb.set_trace()
+
+    def parse_bbox(bbox_str: str) -> Optional[Tuple[int, int, int, int]]:
+        start_pos = bbox_str.find("[")
+        end_pos = bbox_str.find("]")
+        if start_pos == -1 or end_pos == -1 or end_pos <= start_pos:
+            return None
+        bbox_values = bbox_str[start_pos + 1 : end_pos].split(",")
+        if len(bbox_values) != 4:
+            return None
+
+        bbox = tuple(int(value.strip()) for value in bbox_values)
+        if valid_bbox(bbox):
+            return bbox
+    qid = sample["question_id"]
+    conversations = sample["conversations"]
+    question = conversations[0]["value"].replace("Please provide the bounding box coordinate of the region that can help you answer the question better.", "").strip()
+    gt_answer_text = conversations[-1]["value"]
+    images = sample["image"]
+    main_img_path = (
+        dataset_images_root
+        / images[0]
+    )
+    img_ptr = 1
+    step_ptr = 1
+    if not os.path.exists(main_img_path):
+        return None
+    main_img = Image.open(main_img_path).convert("RGB")
+    
+    helpers = []
+    for i, conv in enumerate(conversations[1:]):
+        if "<image>" in conv["value"]:
+            bbox = parse_bbox(images[img_ptr])
+            if not valid_bbox(bbox):
+                return None
+            helper_img = main_img.crop(bbox)
+            helpers.append(
+                {
+                    "step_idx": step_ptr,
+                    "text": "<abs_vis_token></abs_vis_token>",
+                    "image": helper_img,
+                    "type": "crop",
+                }
+            )
+            step_ptr += 1
+        elif "[" in conv["value"] and "]" in conv["value"]:
+            continue
+        else:
+            helpers.append(
+                {
+                    "step_idx": step_ptr,
+                    "text": conv["value"],
+                    "image": None,
+                    "type": "text",
+                }
+            )
+            step_ptr += 1
+
+    return {
+        "qid": qid,
+        "question":add_boxed_instruction(question, allow_None=False, mode="normal"),
+        "gt_choices": None,
+        "gt_answer_text": gt_answer_text,
+        "main_image": main_img,
+        "helpers": helpers,
+    }
+
 def build_policy_conversation(question: str, pil_img: Image.Image) -> Dict[str, Any]:
     return [
         {
@@ -1351,14 +1400,13 @@ def main():
             end_idx = split_num * quarter_cnt
             samples = samples[start_idx:end_idx]
     else:
-        if "Zebra_CoT" in args.dataset_name:
-            data_root = ds_cfg["dataset_path"]
-            samples = load_dataset(
-                "parquet",  # 数据格式
-                data_files={"train": f"{data_root}/train-*.parquet"},
-                split="train",
-                cache_dir=".cache",  # 可写可不写；默认还是 ~/.cache/huggingface
-            )
+        data_root = ds_cfg["dataset_path"]
+        samples = load_dataset(
+            "parquet",  # 数据格式
+            data_files={"train": f"{data_root}/train-*.parquet"},
+            split="train",
+            cache_dir=".cache",  # 可写可不写；默认还是 ~/.cache/huggingface
+        )
 
     if args.limit > 0:
         if isinstance(samples, list):
@@ -1401,6 +1449,8 @@ def main():
             rec = parse_zebra_cot(samp, dataset_images_root)
         elif "VTS" in args.dataset_name:
             rec = parse_vts(samp, dataset_images_root)
+        elif "HELIX" in args.dataset_name:
+            rec = parse_helix(samp, dataset_images_root)
         if rec is None:
             continue
 

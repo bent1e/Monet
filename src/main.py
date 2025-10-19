@@ -18,6 +18,7 @@ from src.trainer import *
 import random
 import wandb
 from time import time
+import pdb
 seed_everything(seed=42)
 args=get_args()
 
@@ -51,7 +52,7 @@ os.environ['HF_HOME'] = cache_dir
 
 patch=14 # processor.image_processor.patch_size
 # Use slow processor to avoid fast-processor info spam and behavioral drift
-processor = AutoProcessor.from_pretrained(args.load_model_path, use_fast=False)
+processor = AutoProcessor.from_pretrained(args.load_model_path, use_fast=True, trust_remote_code=True)
 
 if _rank == 0:
     # Rewrite deprecated preprocessor.json into video_preprocessor.json by re-saving once
@@ -425,7 +426,7 @@ def collate_fn_avt_sft(examples):
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
     texts = [place_output_image_avt(text) for text in texts]
-    
+    #pdb.set_trace()
     ################################################
     # teacher
     ################################################
@@ -827,7 +828,7 @@ def collate_fn_avt_v5_stage1(examples):
     
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
-        image_inputs, new_sizes = resize_by_token_budget(image_inputs)
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=1500*28*28, per_img_max_pixels=1280*28*28)
     elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs)
 
@@ -1041,7 +1042,7 @@ training_args = SFTConfig(
     weight_decay=0.01,
     logging_steps=1,
     save_strategy="steps",
-    save_steps=100,
+    save_steps=250,
     save_total_limit=10,
     optim="adamw_torch_fused",
     bf16=True,

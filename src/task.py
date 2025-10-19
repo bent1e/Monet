@@ -133,7 +133,7 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
                 content["image"] = os.path.join(dataset_root, img_file_name)
                 if j>0 and new_step["content"][j-1]["type"] == "text" and step["role"] == "assistant":
                     if "<abs_vis_token></abs_vis_token>" not in new_step["content"][j-1]["text"]:
-                        print("[Preprocess] No <abs_vis_token> before assistant image. Discard this sample")
+                        #print("[Preprocess] No <abs_vis_token> before assistant image. Discard this sample")
                         return None
                 # Mark that an assistant image has been seen in this step
                 if step["role"] == "assistant":
@@ -154,7 +154,7 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
     sample["data"] = conversations
     
     if not seen_observation:
-        print("[Preprocess] No observation found in assistant responses. Discard this sample")
+        #print("[Preprocess] No observation found in assistant responses. Discard this sample")
         return None
 
     return sample

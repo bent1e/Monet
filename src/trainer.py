@@ -1531,10 +1531,11 @@ class CustomTrainerAVT_V5_Stage1(SFTTrainer):
         """
         Compute training loss and additionally compute token accuracies
         """
-        inputs['stage'] = 'avt_v2_stage1'
+        inputs['stage'] = 'avt_v5_stage1'
         inputs['latent_mode'] = True
         inputs['loss_type'] = []
         #inputs['enable_ce_checkpoint'] = False
+        model.gradient_checkpointing_disable()
         outputs = model(**inputs, return_dict=True, output_hidden_states=False)
         
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -1545,23 +1546,28 @@ class CustomTrainerAVT_V5_Stage1(SFTTrainer):
         inputs['ce_emphasize_poss'] = inputs['observation_poss']
         # Dynamic warmup factor passed to model.forward
         inputs['ce_emphasize_factor'] = self.ce_emphasize_factor
-        inputs['loss_type'] = ['ce', 'alignment']
+        inputs['loss_type'] = ['ce']
+        if self.args.alignment_weight != 0:
+            inputs['loss_type'].append('alignment')
+
         inputs['compute_emphasize_acc'] = True
         # Ensure training forward does NOT request attentions (prevents checkpoint recompute mismatch)
         inputs.pop('output_attentions', None)
         inputs.pop('attn_analysis', None)
         #inputs.pop('attention_mask_4d')
-        teacher_reps = load_offline_tensor(self.args.teacher_reps_dir, batch_metadata=inputs['metadata'], 
-        alignment_layer=self.args.alignment_layer)
-        inputs['alignment_poss'] = inputs['observation_poss']
-        inputs['teacher_hidden_states_for_alignment'] = teacher_reps
+        if self.args.alignment_weight != 0:
+            teacher_reps = load_offline_tensor(self.args.teacher_reps_dir, batch_metadata=inputs['metadata'], 
+            alignment_layer=self.args.alignment_layer)
+            inputs['alignment_poss'] = inputs['observation_poss']
+            inputs['teacher_hidden_states_for_alignment'] = teacher_reps
         teacher_ce_loss, teacher_output = super().compute_loss(
                 model, 
                 inputs,
                 return_outputs=True, num_items_in_batch=num_items_in_batch
             )
-        alignment_loss = teacher_output.loss_dict['alignment']
-        if self.args.emphasize_latent_weight != 1.0:
+        
+        alignment_loss = teacher_output.loss_dict.get('alignment', torch.tensor(0.0))
+        if self.args.emphasize_latent_weight != 1.0 and alignment_loss.item() != 0.0:
             latent_only_loss = compute_latents_only_loss(outputs.ce_patch_vec, self.args.alignment_weight * alignment_loss)
             loss = self.args.emphasize_latent_weight * latent_only_loss + teacher_ce_loss
         else:

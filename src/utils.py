@@ -96,6 +96,7 @@ def get_args():
     parser.add_argument("--attn_analysis", action='store_true', default=False)
     parser.add_argument("--output_latent_embeds", action='store_true', default=False)
     parser.add_argument("--output_hidden_states", action='store_true', default=False)
+    parser.add_argument("--resume", action="store_true", default=False)
     # DeepSpeed config path (optional). If provided, Trainer will enable DeepSpeed with this config.
     # ===== PPL analysis =====
     parser.add_argument("--no_question_image", action='store_true', default=False)
@@ -162,7 +163,7 @@ def place_output_image(text, image_pad="<|vision_start|><|image_pad|><|vision_en
 
 def place_output_image_avt(text, image_pad="<|vision_start|><|image_pad|><|vision_end|>", latent_placeholder="<abs_vis_token></abs_vis_token>", sep_token="<|im_start|>assistant") -> str:
     text = text.split(sep_token)
-    res_text = text[0]
+    res_text = process_multiple_question_img(text[0])
     assistant_texts = text[1:]
     for text in assistant_texts:
         if latent_placeholder in text:
@@ -212,12 +213,19 @@ def remove_assistant_images(examples):
 
     return new_examples
 
+
+def process_multiple_question_img(question_str):
+    if "<abs_vis_token></abs_vis_token>" in question_str:
+        question_str = question_str.replace("<|vision_start|><|image_pad|><|vision_end|>", "").replace("<abs_vis_token></abs_vis_token>", "<|vision_start|><|image_pad|><|vision_end|>")
+    return question_str
+
+
 def replace_visual_spectial_tokens(texts):
 
     update_texts = []
     for i, text in enumerate(texts):
         prev, after = text.split("<|im_start|>assistant")
-        update_texts.append(prev + "<|im_start|>assistant" + after.replace("<|vision_start|><|image_pad|><|vision_end|>", "<|latent_start|><|image_pad|><|latent_end|>"))
+        update_texts.append(process_multiple_question_img(prev) + "<|im_start|>assistant" + after.replace("<|vision_start|><|image_pad|><|vision_end|>", "<|latent_start|><|image_pad|><|latent_end|>"))
         
     return update_texts
 
@@ -226,7 +234,7 @@ def replace_visual_spectial_tokens_avt(texts, latent_size, latent_pad_str="<abs_
     latent_pad_strs = latent_pad_str*latent_size
     for i, text in enumerate(texts):
         turns = text.split("<|im_start|>assistant")
-        upd_text = turns[0]
+        upd_text = process_multiple_question_img(turns[0])
         for turn in turns[1:]:
             upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"<abs_vis_token>{latent_pad_strs}</abs_vis_token>")
         update_texts.append(upd_text)
@@ -237,7 +245,7 @@ def add_abs_vis_token_after_helper_img(texts, latent_size, latent_pad_str="<abs_
     latent_pad_strs = latent_pad_str*latent_size
     for i, text in enumerate(texts):
         turns = text.split("<|im_start|>assistant")
-        upd_text = turns[0]
+        upd_text = process_multiple_question_img(turns[0])
         for turn in turns[1:]:
             upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"<|vision_start|><|image_pad|><|vision_end|><abs_vis_token>{latent_pad_strs}</abs_vis_token>")
         update_texts.append(upd_text)
@@ -248,7 +256,7 @@ def remove_helper_images(texts, latent_size, latent_pad_str="<abs_vis_token_pad>
     latent_pad_strs = latent_pad_str*latent_size
     for i, text in enumerate(texts):
         turns = text.split("<|im_start|>assistant")
-        upd_text = turns[0]
+        upd_text = process_multiple_question_img(turns[0])
         for turn in turns[1:]:
             upd_text += "<|im_start|>assistant" + turn.replace("<|vision_start|><|image_pad|><|vision_end|>", f"")
         update_texts.append(upd_text)

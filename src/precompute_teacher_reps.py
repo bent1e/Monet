@@ -244,7 +244,7 @@ def main():
 
         with torch.inference_mode():
             rng = range(0, len(shard), bs)
-            pbar = tqdm(rng, desc=f"[rank {rank}] precompute", disable=(rank != 0))
+            pbar = tqdm(rng, desc=f"[rank {rank}] precompute", disable=False)
             for i in pbar:
                 cur_ids = shard[i:i+bs]
                 try:

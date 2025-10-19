@@ -52,6 +52,9 @@ from src.task import *
 from src.trainer import *
 import random
 import wandb
+import re
+from glob import glob
+
 args=get_args()
 assert args.save_model_path != "./checkpoints/", "You must specify the save path of the latent embeddings"
 config = Qwen2_5_VLConfig.from_pretrained(args.load_model_path)
@@ -182,6 +185,48 @@ def collate_fn_precompute_teacher_latents(examples):
     batch["metadata"] = metadata
     return batch
 
+def _scan_existing_latents(save_dir: str) -> set[str]:
+    """Scan existing latent_*.pt files and return a set of metadata_info strings.
+    Expected filename pattern: latent_{metadata_info}.pt
+    """
+    if not os.path.isdir(save_dir):
+        return set()
+    done = set()
+    for p in glob(os.path.join(save_dir, "latent_*.pt")):
+        fname = os.path.basename(p)
+        m = re.match(r"^latent_(.+)\.pt$", fname)
+        if m:
+            done.add(m.group(1))
+    return done
+
+
+def _expected_metadata_info(metadata: dict, args) -> str:
+    """Build the expected metadata_info string for a sample metadata dict."""
+    dataset_name = metadata["dataset_name"]
+    sample_id = metadata["sample_id"]
+    # Keep exactly the same prefix rule as in saving code
+    if getattr(args, "output_latent_embeds", False):
+        prefix = "last_layer"
+    else:
+        prefix = "all_layers"
+    return f"{prefix}_{dataset_name}_{sample_id}"
+
+
+def _filter_indices_by_resume(train_dataset: list, args) -> list[int]:
+    """When --resume is on, drop indices that are already computed in save dir."""
+    save_dir = args.save_model_path
+    done = _scan_existing_latents(save_dir)
+    # Build a deterministic list of indices to compute
+    keep = []
+    for idx, ex in enumerate(train_dataset):
+        md = ex["metadata"]
+        info = _expected_metadata_info(md, args)
+        if info not in done:
+            keep.append(idx)
+    return keep
+
+
+
 def _device() -> torch.device:
     if torch.cuda.is_available():
         local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", 0)))
@@ -214,8 +259,19 @@ def main():
         # Iterate data and precompute
         bs = max(1, int(getattr(args, 'bsz', 1)))
         total = len(train_dataset)
+        
+        # ===== Resume support: drop finished samples =====
+        if getattr(args, "resume", False):
+            # Each rank computes the same filtered index list to avoid desync
+            indices_to_process = _filter_indices_by_resume(train_dataset, args)
+            total = len(indices_to_process)
+            if rank == 0:
+                logging.info(f"[resume] filtered unfinished samples: {total} remain (out of {len(train_dataset)}).")
+        else:
+            indices_to_process = list(range(total))
+
+        # Cross-rank consistency check on the filtered total
         if is_dist:
-            # Cross-rank consistency check for dataset length; mismatch is a common source of collective hangs
             try:
                 t = torch.tensor([total], device=device)
                 gathered = [torch.zeros_like(t) for _ in range(world_size)]
@@ -223,30 +279,33 @@ def main():
                 totals = [int(x.item()) for x in gathered]
                 if len(set(totals)) != 1:
                     if rank == 0:
-                        logging.error(f"[precompute] dataset length mismatch across ranks: {totals}. "
-                                      f"This can lead to deadlocks. Exiting.")
+                        logging.error(f"[precompute] filtered total mismatch across ranks: {totals}. Exiting.")
                     return
             except Exception as e:
                 if rank == 0:
-                    logging.warning(f"[precompute] total all_gather check failed: {e}")
-        if rank == 0:
-            logging.info(f"[precompute] total samples={total}, batch_size={bs}, saving to {out_dir}; world_size={world_size}")
+                    logging.warning(f"[precompute] filtered total all_gather check failed: {e}")
 
-        # Build index shards per rank
-        indices = list(range(total))
+        if rank == 0:
+            logging.info(f"[precompute] total_to_process={total}, batch_size={bs}, saving to {out_dir}; world_size={world_size}")
+
+        # Shard by filtered indices
         if is_dist:
             per = (total + world_size - 1) // world_size
             start_idx = rank * per
             end_idx = min(total, (rank + 1) * per)
-            shard = indices[start_idx:end_idx]
+            shard = indices_to_process[start_idx:end_idx]
         else:
-            shard = indices
+            shard = indices_to_process
+
+        if len(shard) == 0:
+            logging.info(f"[precompute] rank {rank}: nothing to do (already finished).")
+            return
 
         # Avoid early barriers that can deadlock if any rank errors; not required for independent precompute
 
         with torch.inference_mode():
             rng = range(0, len(shard), bs)
-            pbar = tqdm(rng, desc=f"[rank {rank}] precompute", disable=(rank != 0))
+            pbar = tqdm(rng, desc=f"[rank {rank}] precompute", disable=False)
             for i in pbar:
                 cur_ids = shard[i:i+bs]
 

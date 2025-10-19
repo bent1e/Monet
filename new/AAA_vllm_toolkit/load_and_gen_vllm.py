@@ -37,12 +37,12 @@ min_pixels = 256*28*28
 # prompt setup
 sys_prompt = "You are a helpful assistant. Answer the question based on the image provided. In the last reasoning step, you should output 'The final answer is: \\boxed{}' and put the final answer in \\boxed{}."
 sys_prompt_pure_language = "You are a helpful assistant. Answer the question based on the text provided. Put your final answer in \\boxed{}."
-qwen_instruct_prompt = "\n\nPlease reason step by step, and put your final answer within \\boxed{}"
+qwen_instruct_prompt = "\n\nPut your final answer within \\boxed{}."
 
 ####################################################################################################################
 
 
-def vllm_mllm_init(mllm_dir, tp=4, gpu_memory_utilization=0.95, max_model_len=4096):
+def vllm_mllm_init(mllm_dir: str, tp=4, gpu_memory_utilization=0.95, max_model_len=4096):
 
     engine_args = EngineArgs(
         model=mllm_dir,
@@ -152,12 +152,9 @@ def vllm_mllm_process_batch_from_messages(messages: List[List[dict]], processor)
             add_generation_prompt=True,
         )
 
-        # 针对这一条对话提取所有图像 (列表)
         image_inputs, _ = process_vision_info(msg, return_video_kwargs=False)
-
         image_inputs, new_sizes = resize_by_token_budget(image_inputs)
 
-        # 若模板里没占位符而 image_inputs 非空，可手动补：
         if image_inputs and ("<image>" not in prompt and "<im_start>" not in prompt):
             prompt = "<image>\n" + prompt        # 或 "<im_start><image><im_end>\n" 视模型而定
 
@@ -169,19 +166,16 @@ def vllm_mllm_process_batch_from_messages(messages: List[List[dict]], processor)
     return vllm_inputs
    
       
-def vllm_mllm_process_batch_data(text_prompts, image_paths, mllm_dir):
+def vllm_mllm_process_batch_data(text_prompts: List[str], image_paths: List[str]):
     inputs = []
     for question, image_path in zip(text_prompts, image_paths):
-        if any([x in mllm_dir for x in qwen_series]):
-            prompt = (f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
-                f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
-                f"{question}{qwen_instruct_prompt}<|im_end|>\n"
-                "<|im_start|>assistant\n")
-            image = process_image(image_path)
-            
-            inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
-        else:
-            raise NotImplementedError("Only Qwen series is supported for now.")
+        prompt = (f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
+            f"{question}{qwen_instruct_prompt}<|im_end|>\n"
+            "<|im_start|>assistant\n")
+        image = process_image(image_path)
+        inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
+
     return inputs
 
 def vllm_mllm_process_single_data(text_prompt, image_path, mllm_dir):
@@ -332,7 +326,7 @@ def vllm_llm_process_batch_data(sys_prompt: str, usr_prompts: List[str], tokeniz
 
 
 def vllm_generate(
-    inputs: List[str],
+    inputs,
     sampling_params: SamplingParams,
     engine: LLM,
 ):
