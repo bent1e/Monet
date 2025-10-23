@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from typing import List, Tuple, Any
 from qwen_vl_utils import process_vision_info as _process_vision_info_single
+import pdb
 
 def process_vision_info_batched(
     conversations_batch: List[dict],
@@ -78,7 +79,7 @@ def _prepare_single_sample_for_batch(
 
     # Build single-sample image inputs and resize (must be bsz==1 here)
     image_inputs, _ = process_vision_info([conversations])
-    image_inputs, _ = resize_by_token_budget(image_inputs)  # only supports single sample
+    image_inputs, _ = resize_by_token_budget(image_inputs, global_max_pixels=1500*28*28, per_img_max_pixels=1280*28*28)  # only supports single sample
 
     # remove the dataset root prefix
     for i, step in enumerate(conversations):
@@ -131,6 +132,14 @@ def filter_invalid_samples_in_json(
         if not batch_samples:
             return
         # Batched tokenize after per-sample resizing & text building
+
+        total_image_pads = 0    
+        for txt, imgs in zip(batch_texts, batch_images):
+            n_img_pad = txt.count("<|vision_start|><|image_pad|>")
+            n_img = len(imgs)
+            if n_img_pad != n_img:
+                pdb.set_trace()
+
         batch = processor(text=batch_texts, images=batch_images, return_tensors="pt", padding=True)
         seq_lens = _tensor_seq_lengths(batch["attention_mask"])
 
@@ -231,20 +240,19 @@ python remove_too_long.py \
     --data_path \
     "./new/created_dataset/filtered_data/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000.json"
 
-
-# Another env
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 source /pfs/wangzihao11/miniconda3/bin/activate
 conda activate mirage
-cd /mmu_vcg_ssd/shiyang06/Project/Latent_Think/abstract-visual-token
+cd /mmu_vcg_ssd/shiyang06-temp/Latent_Think/abstract-visual-token
 python remove_too_long.py \
     --max_seq_len 3000 \
     --bsz 16 \
     --load_model_path /ytech_m2v5_hdd/workspace/kling_mm/Models/Qwen2.5-VL-7B-Instruct \
     --dataset_root /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual \
-    --data_path "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/ReFocus/filtered_train_w_metadata_9.1.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_count/filtered_train_w_metadata_9.1.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_visual_search/filtered_train_w_metadata_from_stage1_9.1.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_geometry/filtered_train_w_metadata_9.1.json" \
-    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_maze/filtered_train_short3000_w_metadata_9.1.json"
+    --data_path "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_arc_agi/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_checkers/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_connect_four/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_rpm/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_tetris/raw_train_w_obs_w_metadata_swap.json" \
+  /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_maze/filtered_train_short3000_w_metadata_9.25_further_washed.json
 """

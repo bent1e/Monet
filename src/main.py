@@ -853,6 +853,8 @@ def collate_fn_avt_v5_stage1(examples):
         )
         batch["attention_mask_4d"] = {"full_attention": attn_mask_4d }
 
+    if args.v5_s1_align_poss == 'latent_end':
+        batch["latent_end_poss"] = find_ids_poss(batch["input_ids"], answer_start_pattern, latent_end_idx)
     
     observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
     observation_end_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_end_idx)
@@ -1125,6 +1127,7 @@ elif args.stage in ['avt_v5_stage1','avt_v5_stage2']:
     setattr(training_args, 'teacher_reps_dir', args.teacher_reps_dir)
     setattr(training_args, 'teacher_latent_dir', args.teacher_latent_dir)
     setattr(training_args, 'image_resize', args.image_resize)
+    setattr(training_args, 'v5_s1_align_poss', args.v5_s1_align_poss)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(

@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+
+'''
+conda activate mirage
+cd /mmu_vcg_ssd/shiyang06-temp/Latent_Think/abstract-visual-token/new/dataset_utils
+python -m scan_pt_integrity \
+    --root /mmu_vcg_ssd/shiyang06-temp/Latent_Think/checkpoint/precomputed_teacher_reps/10.19_v5_s1_rw_pt-sft-1000_latent8_ce4.0_align-wt2.0_emph-wt2.0 \
+    --print_corrupted_only \
+    --workers 64
+'''
+
+
 """
 Scan .pt files by attempting torch.load only.
 A file is considered corrupted if torch.load raises an exception.

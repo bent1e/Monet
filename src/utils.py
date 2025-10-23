@@ -57,6 +57,9 @@ def get_args():
     # ===== AVT v4 =====
     parser.add_argument("--no_ce", action='store_true', default=False, help="If true, only use alignment loss to train the model.")
 
+    # ===== AVT v5 =====
+    parser.add_argument("--v5_s1_align_poss", default='obs', choices=['obs', 'latent_end'])
+
     # ===== Training record arguments =====
     parser.add_argument("--log_file", type=str, default='./log.txt')
     parser.add_argument("--wandb_name", default=None, help="Name for the Weights & Biases run. If None, no W&B logging is done.")
@@ -113,6 +116,9 @@ def get_args():
     parser.add_argument("--use_align_vision_latent_loss_projector", action='store_true', default=False)
     parser.add_argument("--use_align_vision_latent_loss_pooling", action='store_true', default=False)
     parser.add_argument("--align_vision_latent_loss_weight", type=float, default=1.0)
+
+    # ===== Args from other =====
+    parser.add_argument("--remove_too_long_workers", type=int, default=16)
 
     return parser.parse_args()
 

@@ -21,7 +21,8 @@ torchrun --nproc-per-node=4 --master-port=29501 -m src.precompute_teacher_latent
     --output_hidden_states
 
 '''
-
+import re
+from glob import glob
 import os as _early_os
 # Also import standard os for later usages in this file
 import os
@@ -165,17 +166,20 @@ def collate_fn_precompute_teacher_rep(examples, alignment="boxed_start"):
     batch['teacher_input_ids'] = teacher_batch['input_ids']
     batch['teacher_attention_mask'] = teacher_batch['attention_mask']
 
-    observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
-    observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
-    batch["teacher_observation_poss"] = []
-    assert len(observation_start_poss) == len(observation_end_poss)
-    for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
-        poss_of_a_sample = []
-        if len(start_poss) > 0 and len(end_poss) > 0:
-            assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
-            for start, end in zip(start_poss, end_poss):
-                poss_of_a_sample.extend(list(range(start, end)))
-        batch["teacher_observation_poss"].append(poss_of_a_sample)
+    if args.v5_s1_align_poss == 'obs':
+        observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
+        observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
+        batch["teacher_observation_poss"] = []
+        assert len(observation_start_poss) == len(observation_end_poss)
+        for start_poss, end_poss in zip(observation_start_poss, observation_end_poss):
+            poss_of_a_sample = []
+            if len(start_poss) > 0 and len(end_poss) > 0:
+                assert len(start_poss) == len(end_poss), f"start_poss: {start_poss}, end_poss: {end_poss}"
+                for start, end in zip(start_poss, end_poss):
+                    poss_of_a_sample.extend(list(range(start, end)))
+            batch["teacher_observation_poss"].append(poss_of_a_sample)
+    elif args.v5_s1_align_poss == 'latent_end':
+        batch["latent_end_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_end_idx)
 
     return batch
 
@@ -190,6 +194,49 @@ def _device() -> torch.device:
         return torch.device(f"cuda:{local_rank}")
     return torch.device("cpu")
 
+
+def _scan_existing_reps(save_dir: str, align_poss = "obs") -> set[str]:
+    """Scan existing rep_*.pt files and return a set of metadata_info strings.
+    Expected filename pattern: rep_{metadata_info}.pt
+    """
+    if not os.path.isdir(save_dir):
+        return set()
+    done = set()
+    if align_poss == 'obs':
+        pattern = r"^rep_(.+)\.pt$"
+    elif align_poss == 'latent_end':
+        pattern = r"^rep_latent_end_(.+)\.pt$"
+    for p in glob(os.path.join(save_dir, "rep_*.pt")):
+        fname = os.path.basename(p)
+        m = re.match(pattern, fname)
+        if m:
+            done.add(m.group(1))
+    return done
+
+
+def _expected_metadata_info(metadata: dict, args) -> str:
+    """Build the expected metadata_info string for a sample metadata dict."""
+    dataset_name = metadata["dataset_name"]
+    sample_id = metadata["sample_id"]
+    # Keep exactly the same prefix rule as in saving code
+    if getattr(args, "output_latent_embeds", False):
+        prefix = "last_layer"
+    else:
+        prefix = "all_layers"
+    return f"{prefix}_{dataset_name}_{sample_id}"
+
+def _filter_indices_by_resume(train_dataset: list, args, align_poss = "obs") -> list[int]:
+    """When --resume is on, drop indices that are already computed in save dir."""
+    save_dir = args.save_model_path
+    done = _scan_existing_reps(save_dir, align_poss = align_poss)
+    # Build a deterministic list of indices to compute
+    keep = []
+    for idx, ex in enumerate(train_dataset):
+        md = ex["metadata"]
+        info = _expected_metadata_info(md, args)
+        if info not in done:
+            keep.append(idx)
+    return keep
 
 def main():
     # Initialize distributed if requested
@@ -212,6 +259,17 @@ def main():
         # Iterate data and precompute
         bs = max(1, int(getattr(args, 'bsz', 1)))
         total = len(train_dataset)
+
+        # ===== Resume support: drop finished samples =====
+        if getattr(args, "resume", False):
+            # Each rank computes the same filtered index list to avoid desync
+            indices_to_process = _filter_indices_by_resume(train_dataset, args, align_poss = args.v5_s1_align_poss)
+            total = len(indices_to_process)
+            if rank == 0:
+                logging.info(f"[resume] filtered unfinished samples: {total} remain (out of {len(train_dataset)}).")
+        else:
+            indices_to_process = list(range(total))
+
         if is_dist:
             # Cross-rank consistency check for dataset length; mismatch is a common source of collective hangs
             try:
@@ -236,9 +294,9 @@ def main():
             per = (total + world_size - 1) // world_size
             start_idx = rank * per
             end_idx = min(total, (rank + 1) * per)
-            shard = indices[start_idx:end_idx]
+            shard = indices_to_process[start_idx:end_idx]
         else:
-            shard = indices
+            shard = indices_to_process
 
         # Avoid early barriers that can deadlock if any rank errors; not required for independent precompute
 
@@ -250,6 +308,10 @@ def main():
                 try:
                     examples = [train_dataset[j] for j in cur_ids]
                     batch = collate_fn_precompute_teacher_rep(examples)
+                    if args.v5_s1_align_poss == 'obs':
+                        alignment_poss = batch['teacher_observation_poss']
+                    elif args.v5_s1_align_poss == 'latent_end':
+                        alignment_poss = batch['latent_end_poss']
                     inputs = {
                         'latent_mode': False,
                         'input_ids': batch['teacher_input_ids'].to(device),
@@ -257,7 +319,7 @@ def main():
                         'pixel_values': batch['teacher_pixel_values'].to(device),
                         'image_grid_thw': batch['teacher_image_grid_thw'].to(device),
                         'labels': None,
-                        'alignment_poss': batch['teacher_observation_poss'],
+                        'alignment_poss': alignment_poss,
                         'loss_type': [],
                     }
                     if args.output_latent_embeds:
@@ -281,7 +343,11 @@ def main():
                             metadata_info = f"last_layer_{dataset_name}_{sample_id}"
                         elif args.output_hidden_states:
                             metadata_info = f"all_layers_{dataset_name}_{sample_id}"
-                        save_path = os.path.join(out_dir, f"rep_{metadata_info}.pt")
+                        if args.v5_s1_align_poss == 'obs':
+                            metadata_str = f"rep_{metadata_info}.pt"
+                        elif args.v5_s1_align_poss == 'latent_end':
+                            metadata_str = f"rep_latent_end_{metadata_info}.pt"
+                        save_path = os.path.join(out_dir, metadata_str)
                         torch.save({'metadata_info': metadata_info, 'latent': teacher_reps[b].detach().cpu()}, save_path)
                 except Exception as e:
                     logging.exception(f"[rank {rank}] Failed at batch start={i}, ids={cur_ids}: {e}")

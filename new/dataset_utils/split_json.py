@@ -1,5 +1,5 @@
 '''
-python split_json.py /home/dids/shiyang/codes/abstract-visual-token/new/created_dataset/filtered_data/Zebra_CoT_maze/filtered_train_short3000_w_metadata.json 4
+python split_json.py /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Visual_CoT/filtered_train_10.7.json 4
 
 '''
 

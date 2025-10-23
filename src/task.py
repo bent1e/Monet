@@ -111,8 +111,8 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
     """
     Preprocess function for AVT with single input images.
     """
-
-
+    n_img_pad = 0
+    n_img = 0
     conversations = sample["data"]
     seen_observation = False
     # Process image loading for all steps first
@@ -137,22 +137,31 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
                         return None
                 # Mark that an assistant image has been seen in this step
                 if step["role"] == "assistant":
+                    n_img += 1
                     seen_assistant_image = True
-            elif content["type"] == "text" and step["role"] == "assistant":
-                # Validate that any observation text must be preceded by an assistant image within the same step
-                if "<observation>" in content.get("text", "") and not seen_assistant_image:
-                    content['text'] = content['text'].replace("<observation>", "").replace("</observation>", "")
-                if "<observation>" in content.get("text", ""):
-                    seen_observation = True
-            elif content["type"] == "text" and step["role"] == "user":
-                img_key = "image_file_name" if "image_file_name" in new_step["content"][0] else "image"
-                if 'Zebra_CoT_visual_search' not in new_step["content"][0][img_key] and 'Zebra_CoT_count' not in new_step["content"][0][img_key]: # keep boxed instructions for Zebra_CoT_visual_search
-                    content["text"] = content["text"].replace("\nPut your final answer within \\boxed{}.", "")
+            elif content["type"] == "text":
+                
+                if step["role"] == "assistant":
+                    n_img_pad += content['text'].count('<abs_vis_token></abs_vis_token>')
+                    # Validate that any observation text must be preceded by an assistant image within the same step
+                    if "<observation>" in content.get("text", "") and not seen_assistant_image:
+                        content['text'] = content['text'].replace("<observation>", "").replace("</observation>", "")
+                    if "<observation>" in content.get("text", ""):
+                        seen_observation = True
+
+                elif step["role"] == "user":
+                    img_key = "image_file_name" if "image_file_name" in new_step["content"][0] else "image"
+                    if 'Zebra_CoT_visual_search' not in new_step["content"][0][img_key] and 'Zebra_CoT_count' not in new_step["content"][0][img_key]: # keep boxed instructions for Zebra_CoT_visual_search
+                        content["text"] = content["text"].replace("\nPut your final answer within \\boxed{}.", "")
 
             new_step["content"][j] = content
         conversations[i] = new_step
     sample["data"] = conversations
     
+    if n_img != n_img_pad:
+        print(f"n_img ({n_img}) != num of <abs_vis_token></abs_vis_token> ({n_img_pad}), discard this sample")
+        return None
+
     if not seen_observation:
         #print("[Preprocess] No observation found in assistant responses. Discard this sample")
         return None
