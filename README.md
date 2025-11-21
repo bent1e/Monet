@@ -26,8 +26,8 @@
 </p>
 
 
-[![arXiv](https://img.shields.io/badge/arXiv-PyVision-b31b1b)](...)
-[![Model](https://img.shields.io/badge/Demo-Monet7B-yellow)](https://huggingface.co/NOVAglow646/Monet-7B)
+[![arXiv](https://img.shields.io/badge/arXiv-PyVision-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org)
+[![Model](https://img.shields.io/badge/Demo-Monet7B-yellow?logo=huggingface&logoColor=white)](https://huggingface.co/NOVAglow646/Monet-7B)
 
 
 <p align="center">
