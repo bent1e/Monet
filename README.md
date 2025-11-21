@@ -17,8 +17,6 @@
     <a href="https://www.arxiv.org/abs/2506.17218">
       <img src='https://img.shields.io/badge/Paper-PDF-red?style=flat&logo=arXiv&logoColor=red' alt='Paper PDF'>
     </a>
-  </p>
-  <p align="center">
     <a href="https://huggingface.co/YourOrg/YourModel" target="_blank" rel="noopener noreferrer">
       <img src="https://img.shields.io/badge/Model-HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HF Model">
     </a>
