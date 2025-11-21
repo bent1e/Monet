@@ -60,7 +60,7 @@ ALIGN_SYS_PROMPT_exact = (
 
 "4. Do NOT put information that can be inferred from the question text or earlier reasoning into <observation>...</observation>.\n\n"
 
-"5. If you think there'no observation, just return the input text unchanged.\n\n"
+"5. If you think there's no observation, just return the input text unchanged.\n\n"
 )
 
 

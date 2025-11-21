@@ -26,6 +26,9 @@ def get_args():
     parser.add_argument("--num_samples", default=-1, help="-1 means all data", type=int)
     parser.add_argument("--max_seq_len", type=int, default=4096, help="Maximum allowed sequence length after processing.")
     parser.add_argument("--image_resize", type=str, choices=["global", "clear_question_img"], default="global")
+    parser.add_argument("--save_freq", type=int, default=250)
+    parser.add_argument("--log_freq", default=10, type=int)
+    parser.add_argument("--allow_no_observation", action='store_true', default=False)
     # ===== Basic training hyperparameters =====
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for training.")
     parser.add_argument("--bsz", type=int, default=1, help="Batch size for training.")
@@ -59,6 +62,9 @@ def get_args():
 
     # ===== AVT v5 =====
     parser.add_argument("--v5_s1_align_poss", default='obs', choices=['obs', 'latent_end'])
+    parser.add_argument("--v5_s1_global_img_tokens", type=int, help="Maximum img pixels in a sequence will be v5_s1_global_max_img_tokens*28*28", default=1500)
+    parser.add_argument("--v5_s1_per_img_tokens", type=int, help="Maximum pixels per img will be v5_s1_global_max_img_tokens*28*28", default=1280)
+    parser.add_argument("--v5_s2_img_tokens", type=int, help="Maximum img pixels in a sequence will be v5_s1_global_max_img_tokens*28*28", default=2000)
 
     # ===== Training record arguments =====
     parser.add_argument("--log_file", type=str, default='./log.txt')

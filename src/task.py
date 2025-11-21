@@ -107,7 +107,7 @@ def OLD_abstract_visual_token_single_input_images_preprocess_function(sample, ad
     
     return merged_conversations
 
-def avt_single_input_images_preprocess_function(sample, dataset_root=""):
+def avt_single_input_images_preprocess_function(sample, dataset_root="", allow_no_observation=False):
     """
     Preprocess function for AVT with single input images.
     """
@@ -162,7 +162,7 @@ def avt_single_input_images_preprocess_function(sample, dataset_root=""):
         print(f"n_img ({n_img}) != num of <abs_vis_token></abs_vis_token> ({n_img_pad}), discard this sample")
         return None
 
-    if not seen_observation:
+    if not seen_observation and not allow_no_observation:
         #print("[Preprocess] No observation found in assistant responses. Discard this sample")
         return None
 

@@ -10,12 +10,11 @@ LATENT_SIZE=8
 CE_EMPHASIZE_FACTOR=4.0
 ALIGNMENT_WEIGHT=2.0
 TEACHER_EMPHASIZE_LATENT_WEIGHT=2.0
-
 TEACHER_ALIGN_WEIGHT=2.0
 
-TEACHER=10.19_v5_s1_rw_pt-sft-1000_latent8_ce4.0_align-wt${TEACHER_ALIGN_WEIGHT}_emph-wt${TEACHER_EMPHASIZE_LATENT_WEIGHT}/checkpoint-1000
+TEACHER=10.26_v5_s1-imgrsz3000-1280_mix_pt-sft-2250_latent${LATENT_SIZE}_ce4.0_align-wt${TEACHER_ALIGN_WEIGHT}_emph-wt${TEACHER_EMPHASIZE_LATENT_WEIGHT}/checkpoint-3450
 
-SAVE_CKPT=10.21_v5_s2_rw_pt-sft1000_s1-pt-sft1000_teacher-al${TEACHER_ALIGN_WEIGHT}-emph${TEACHER_EMPHASIZE_LATENT_WEIGHT}-1000_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align${ALIGNMENT_WEIGHT}
+SAVE_CKPT=10.29_v5_s2_imgrsz3000_mix_pt-sft2250_s1-pt-sft2250_teacher-rsz3000-al${TEACHER_ALIGN_WEIGHT}-emph${TEACHER_EMPHASIZE_LATENT_WEIGHT}-3450_latent${LATENT_SIZE}_ce${CE_EMPHASIZE_FACTOR}_align${ALIGNMENT_WEIGHT}
 torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --epochs 3 \
   --bsz 1 \
@@ -29,8 +28,14 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
     "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed_max_seq_len3000.json" \
     "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_geometry/filtered_train_w_metadata_9.1.json" \
     "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_count/filtered_train_w_metadata_9.25_max_seq_len4096_max_seq_len3000.json" \
+    "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_arc_agi/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_checkers/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_connect_four/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_rpm/raw_train_w_obs_w_metadata_swap.json" \
+  "/ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_tetris/raw_train_w_obs_w_metadata_swap.json" \
+  /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual/Zebra_CoT_maze/filtered_train_short3000_w_metadata_9.25_further_washed.json \
   --log_file "./log.txt" \
-  --load_model_path /mmu_vcg_ssd/shiyang06-temp/Latent_Think/checkpoint/avt_v5/${SAVE_CKPT}/checkpoint-2000 \
+  --load_model_path /mmu_vcg_ssd/shiyang06-temp/Latent_Think/checkpoint/avt_sft/10.19_sft_mix_ce2.0/checkpoint-1250 \
   --save_model_path /mmu_vcg_ssd/shiyang06-temp/Latent_Think/checkpoint/avt_v5/${SAVE_CKPT} \
   --dataset_root /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Dataset/abstract_visual \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
@@ -40,4 +45,4 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
   --teacher_latent_dir /mmu_vcg_ssd/shiyang06-temp/Latent_Think/checkpoint/precomputed_teacher_reps/${TEACHER} \
   --alignment_layer all_layers \
-  --resume_from_checkpoint
+  --v5_s2_img_tokens 3000

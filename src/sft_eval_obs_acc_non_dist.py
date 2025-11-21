@@ -28,6 +28,10 @@ import os
 import shutil
 from functools import partial
 import torch
+import torch.distributed as dist
+import json
+from pathlib import Path
+import re
 from new.avt_qwen_model import apply_qwen2_5_avt
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLConfig, AutoTokenizer, AutoProcessor
 from PIL import Image
@@ -133,14 +137,33 @@ except Exception:
     pass
 
 
-def _device() -> torch.device:
-    """Return the first CUDA device if available, else CPU."""
+def _init_distributed_if_needed():
+    """Initialize torch.distributed if launched with torchrun.
+
+    Returns (rank, world_size, local_rank, is_main).
+    """
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    is_distributed = world_size > 1
+
+    if is_distributed and not dist.is_initialized():
+        backend = "nccl" if torch.cuda.is_available() and os.name != "nt" else "gloo"
+        dist.init_process_group(backend=backend, init_method="env://")
+    return rank, world_size, local_rank, (rank == 0)
+
+
+def _device(local_rank: int | None = None) -> torch.device:
+    """Return the CUDA device matching local_rank if available, else CPU."""
     if torch.cuda.is_available():
+        if local_rank is None:
+            # Fallback to env var if present
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
         try:
-            torch.cuda.set_device(0)
+            torch.cuda.set_device(local_rank)
         except Exception:
             pass
-        return torch.device("cuda:0")
+        return torch.device(f"cuda:{local_rank}")
     return torch.device("cpu")
 
 def collate_fn_w_or_wo_helper_img(examples, alignment="boxed_start"):
@@ -223,26 +246,74 @@ def collate_fn_w_or_wo_helper_img(examples, alignment="boxed_start"):
     return batch
 
 def main():
-    # Device setup (single process)
-    device = _device()
+    # Distributed init and device setup
+    rank, world_size, local_rank, is_main = _init_distributed_if_needed()
+    device = _device(local_rank)
     model.to(device)
 
     # Iterate data and precompute
-    bs = max(1, int(getattr(args, 'bsz', 1)))
+    bs = max(1, int(getattr(args, 'bsz', 1)))  # Note: per-process batch size under torchrun
     total = len(train_dataset)
 
-    # In single-process mode, use all indices
+    # Build per-rank shard of indices (strided sharding keeps balance without extra copies)
     indices = list(range(total))
-    shard = indices  # no sharding
-    
+    shard = indices[rank::world_size] if (world_size > 1) else indices
+
+    # ================= Resume support (conditional via --resume) =================
+    resume_enabled = getattr(args, 'resume', False)
+    resume_path = None
+    processed_ids = set()
+    w_helper_img_acc_cum_resume = 0.0
+    wo_helper_img_acc_cum_resume = 0.0
+    valid_cnt_resume = 0
+    if resume_enabled:
+        # Unified storage directory for progress JSON files
+        unified_dir = Path('/mmu_vcg_ssd/shiyang06-temp/Latent_Think/abstract-visual-token/logs/obs_acc_analysis')
+        if is_main:
+            try:
+                unified_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                print(f'[RESUME] Failed to create directory {unified_dir}: {e}')
+        if dist.is_initialized():
+            dist.barrier()
+        # Derive a safe model name from load_model_path
+        raw_name = os.path.basename(str(args.load_model_path).rstrip('/')) or 'model'
+        safe_model_name = re.sub(r'[^A-Za-z0-9_.-]', '_', raw_name)
+        resume_path = unified_dir / f'{safe_model_name}_rank{rank}.json'
+        if resume_path.exists():
+            try:
+                with resume_path.open('r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                if saved.get('shard') == shard:
+                    processed_ids = set(saved.get('processed_ids', []))
+                    w_helper_img_acc_cum_resume = float(saved.get('w_sum', 0.0))
+                    wo_helper_img_acc_cum_resume = float(saved.get('wo_sum', 0.0))
+                    valid_cnt_resume = int(saved.get('cnt', 0))
+                    if is_main:
+                        print(f'[RESUME] Loaded resume state from {resume_path}, processed {len(processed_ids)} batches previously.')
+                else:
+                    if is_main:
+                        print(f'[RESUME] Shard mismatch – ignoring existing resume file {resume_path}.')
+            except Exception as e:
+                if is_main:
+                    print(f'[RESUME] Failed to load resume file {resume_path}: {e}')
+
     with torch.inference_mode():
         rng = range(0, len(shard), bs)
-        pbar = tqdm(rng, desc="eval sft token acc", disable=False)
-        valid_cnt = 0
-        w_helper_img_acc_cum = 0.
-        wo_helper_img_acc_cum = 0.
+        pbar = tqdm(rng, desc="eval sft token acc", disable=not is_main)
+        # Initialize with resume sums (0 if disabled)
+        w_helper_img_acc_cum = w_helper_img_acc_cum_resume if resume_enabled else 0.0
+        wo_helper_img_acc_cum = wo_helper_img_acc_cum_resume if resume_enabled else 0.0
+        valid_cnt = valid_cnt_resume if resume_enabled else 0
         for i in pbar:
             cur_ids = shard[i:i + bs]
+            if len(cur_ids) == 0:
+                continue
+            # Use starting sample id as batch identifier for resume
+            batch_token = cur_ids[0]
+            if resume_enabled and batch_token in processed_ids:
+                continue  # already processed this batch earlier
+
             examples = [train_dataset[j] for j in cur_ids]
             batch = collate_fn_w_or_wo_helper_img(examples)
 
@@ -259,8 +330,8 @@ def main():
                 'ce_emphasize_poss': batch['teacher_observation_poss']
             }
             outputs = model(**inputs)
-            w_helper_img_acc_cum += outputs.mean_emphasize_acc
-            
+            w_helper_img_acc_cum += float(outputs.mean_emphasize_acc)
+
             # wo helper img
             inputs = {
                 "input_ids": batch['student_input_ids'].to(device),
@@ -274,12 +345,46 @@ def main():
                 'ce_emphasize_poss': batch['student_observation_poss']
             }
             outputs = model(**inputs)
-            wo_helper_img_acc_cum += outputs.mean_emphasize_acc
+            wo_helper_img_acc_cum += float(outputs.mean_emphasize_acc)
             valid_cnt += 1
-        w_acc = w_helper_img_acc_cum / valid_cnt
-        wo_acc = wo_helper_img_acc_cum / valid_cnt
-        print(f"w helper img avg token acc: {w_acc}")
-        print(f"wo helper img avg token acc: {wo_acc}")
-        print(f"difference (w - wo): {w_acc - wo_acc}")
+
+            # Persist resume state (per rank) after each successful batch
+            if resume_enabled and resume_path is not None:
+                processed_ids.add(batch_token)
+                try:
+                    tmp_path = resume_path.with_suffix('.tmp')
+                    with tmp_path.open('w', encoding='utf-8') as f:
+                        json.dump({
+                            'shard': shard,
+                            'processed_ids': list(processed_ids),
+                            'w_sum': w_helper_img_acc_cum,
+                            'wo_sum': wo_helper_img_acc_cum,
+                            'cnt': valid_cnt,
+                        }, f)
+                    tmp_path.replace(resume_path)
+                except Exception as e:
+                    if is_main:
+                        print(f'[RESUME] Failed to write resume file {resume_path}: {e}')
+
+        # Aggregate across ranks if distributed
+        if dist.is_initialized():
+            t = torch.tensor([w_helper_img_acc_cum, wo_helper_img_acc_cum, float(valid_cnt)], device=device, dtype=torch.float64)
+            dist.all_reduce(t, op=dist.ReduceOp.SUM)
+            w_helper_img_acc_cum, wo_helper_img_acc_cum, valid_cnt = t.tolist()
+
+        if is_main:
+            w_acc = (w_helper_img_acc_cum / max(1.0, valid_cnt)) if valid_cnt else 0.0
+            wo_acc = (wo_helper_img_acc_cum / max(1.0, valid_cnt)) if valid_cnt else 0.0
+            print(f"w helper img avg token acc: {w_acc}")
+            print(f"wo helper img avg token acc: {wo_acc}")
+            print(f"difference (w - wo): {w_acc - wo_acc}")
+            # Keep resume JSON for record; user can delete manually if desired.
+            if resume_enabled and resume_path is not None:
+                print(f"[RESUME] Progress file retained at {resume_path}")
+
+    # Clean up distributed
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 if __name__ == "__main__":
     main()
