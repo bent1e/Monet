@@ -68,17 +68,6 @@ class CustomTrainerSFT_STAGE1(SFTTrainer):
         if 'processing_class' not in kwargs and 'tokenizer' in kwargs:
             kwargs['processing_class'] = kwargs.pop('tokenizer')
         super().__init__(*args, **kwargs)
-        self.weight = 1.0
-        # ce_emphasize_factor warmup configuration
-        # Target factor (backward compatible with existing arg name)
-        self._ce_emphasize_target: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
-        # Optional absolute warmup steps takes precedence over ratio
-        self._ce_emphasize_warmup_steps: int = int(getattr(self.args, 'ce_emphasize_warmup_steps', 0) or 0)
-        self.is_main_process = (
-            not torch.distributed.is_initialized()
-            or torch.distributed.get_rank() == 0
-        )
-
         self.observation_token_acc = 0.
         self.observation_token_acc_step = 0
         self.teacher_ce_cum = 0.0        # cumulative student CE loss
@@ -254,7 +243,7 @@ class CustomTrainerSFT_STAGE3(SFTTrainer):
     def __init__(self, *args, **kwargs): 
         self.exp_name =kwargs.pop('exp_name')
         super().__init__(*args, **kwargs)
-        self.weight = self.args.alignment_weight
+        self.alignment_weight = self.args.alignment_weight
         self.ce_emphasize_factor: float = float(getattr(self.args, 'ce_emphasize_factor', 1.0))
         # Where to read precomputed teacher latents
         self.teacher_latent_dir = getattr(self.args, 'teacher_latent_dir', None)
@@ -308,7 +297,7 @@ class CustomTrainerSFT_STAGE3(SFTTrainer):
             self.observation_token_acc += getattr(student_outputs, 'mean_emphasize_acc')
             self.observation_token_acc_step += 1
         alignment_loss = student_outputs.loss_dict['alignment']
-        loss = student_ce_loss + self.weight * alignment_loss
+        loss = student_ce_loss + self.alignment_weight * alignment_loss
         outputs_student_loss = student_ce_loss.item()
 
         del student_outputs

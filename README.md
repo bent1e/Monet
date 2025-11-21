@@ -1,30 +1,38 @@
 <p align="center">
-  <h1 align="center">Machine Mental Imagery: Empower Multimodal Reasoning with Latent Visual Tokens</h1>
+  <h1 align="center">Monet: Reasoning in Latent Visual Space Beyond Images and Language</h1>
   <p align="center">
     arXiv 2025
   </p>
   <p align="center">
-    <a href="https://miicheyang.github.io">Zeyuan Yang*</a>,
-    <a href="https://scholar.google.com/citations?user=AIm87GIAAAAJ">Xueyang Yu*</a>,
-    <a href="https://chendl02.github.io/">Delin Chen</a>,
-    <a href="https://maohaos2.github.io/Maohao/">Maohao Shen</a>,
-    <a href="https://people.csail.mit.edu/ganchuang">Chuang Gan</a>
+    <a href="https://novaglow646.github.io/">Qixun Wang</a>,
+    <a href="https://frankyang-17.github.io/">Yang Shi</a>,
+    <a href="https://yifeiwang77.com/">Yifei Wang</a>,
+    <a href="https://scholar.google.com/citations?user=COdftTMAAAAJ&hl=en">Yuanxing Zhang</a>,
+    <a href="https://magicwpf.github.io/">Pengfei Wan</a>,
+    <a href="https://scholar.google.com/citations?user=PXO4ygEAAAAJ&hl=zh-CN">Kun Gai</a>,
+    <a href="https://scholar.google.com/citations?user=27o9L1wAAAAJ&hl=en">Xianghua Ying</a>,
+    <a href="https://yisenwang.github.io/">Yisen Wang</a>,
   </p>
   <p align="center">
     <a href="https://www.arxiv.org/abs/2506.17218">
       <img src='https://img.shields.io/badge/Paper-PDF-red?style=flat&logo=arXiv&logoColor=red' alt='Paper PDF'>
     </a>
-    <a href='https://vlm-mirage.github.io' style='padding-left: 0.5rem;'>
-      <img src='https://img.shields.io/badge/Project-Page-blue?style=flat&logo=Google%20chrome&logoColor=blue' alt='Project Page'>
+  </p>
+  <p align="center">
+    <a href="https://huggingface.co/YourOrg/YourModel" target="_blank" rel="noopener noreferrer">
+      <img src="https://img.shields.io/badge/Model-HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HF Model">
+    </a>
+    <a href="https://huggingface.co/datasets/YourOrg/YourDataset" target="_blank" rel="noopener noreferrer">
+      <img src="https://img.shields.io/badge/Dataset-HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=black" alt="HF Dataset">
     </a>
   </p>
 </p>
 
 
-We propose **Mirage**, **interleaving latent visual tokens**, which represent compact imagery visual features, with explicit text tokens to solve diverse **multimodal reasoning** tasks, boosting the reasoning performance without the full pixel-level image generation.
+
 
 <p align="center">
-    <img src="asset/teaser.png" alt="Logo" width="190%">
+    <img src="images/overview.png" alt="Logo" width="190%">
 </p>
 
 <br>
@@ -54,19 +62,15 @@ We propose **Mirage**, **interleaving latent visual tokens**, which represent co
   </ol>
 </details>
 
-## News
-- [2025-06-19] We have released the training and inference code!
-
 ## Installation
 Create a conda environment and install the required packages:
 ```bash
-conda create -n mirage python=3.10
-conda activate mirage
+conda create -n monet python=3.10
+conda activate monet
 
-git clone https://github.com/UMass-Embodied-AGI/Mirage.git
-cd Mirage
+git clone https://github.com/NOVAglow646/Monet.git
+cd Monet
 pip install -r requirements.txt
-pip install -e ./transformers/.
 ```
 
 ## Data Preparation

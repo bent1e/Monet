@@ -1,26 +1,3 @@
-'''
-export CUDA_HOME=/usr/local/cuda-12.6
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
-conda activate mirage
-cd /home/dids/shiyang/codes/abstract-visual-token
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-export TOKENIZERS_PARALLELISM=false
-CKPT=avt_sft/9.24_debug_avt_sft_com_refocus_search-fwsh_ce5.0/checkpoint-180
-torchrun --nproc-per-node=4 --master-port=29501 -m src.precompute_teacher_latents \
-    --bsz 1 \
-    --task "mm-reasoning" \
-    --data_path \
-    "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
-  "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" \
-  "./new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json" \
-    --log_file "./log.txt" \
-    --load_model_path /home/dids/shiyang/checkpoints/${CKPT} \
-    --save_model_path ./new/precomputed_teacher_latents/${CKPT} \
-    --deepspeed ./deepspeed/ds_zero2_gpu.json \
-    --output_hidden_states
-
-'''
 import re
 from glob import glob
 import os as _early_os
@@ -145,7 +122,7 @@ def collate_fn_precompute_teacher_rep(examples, alignment="boxed_start"):
     texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
-    texts = [place_output_image_avt(text) for text in texts]
+    texts = [replace_latent_placeholder_with_img_pad(text) for text in texts]
     
     ################################################
     # teacher
@@ -166,7 +143,7 @@ def collate_fn_precompute_teacher_rep(examples, alignment="boxed_start"):
     batch['teacher_input_ids'] = teacher_batch['input_ids']
     batch['teacher_attention_mask'] = teacher_batch['attention_mask']
 
-    if args.v5_s1_align_poss == 'obs':
+    if args.sft_stage2_align_poss == 'obs':
         observation_start_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_start_idx)
         observation_end_poss = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, observation_end_idx)
         batch["teacher_observation_poss"] = []
@@ -178,7 +155,7 @@ def collate_fn_precompute_teacher_rep(examples, alignment="boxed_start"):
                 for start, end in zip(start_poss, end_poss):
                     poss_of_a_sample.extend(list(range(start, end)))
             batch["teacher_observation_poss"].append(poss_of_a_sample)
-    elif args.v5_s1_align_poss == 'latent_end':
+    elif args.sft_stage2_align_poss == 'latent_end':
         batch["latent_end_poss"] = find_ids_poss(batch["teacher_input_ids"], answer_start_pattern, latent_end_idx)
 
     return batch
@@ -263,7 +240,7 @@ def main():
         # ===== Resume support: drop finished samples =====
         if getattr(args, "resume", False):
             # Each rank computes the same filtered index list to avoid desync
-            indices_to_process = _filter_indices_by_resume(train_dataset, args, align_poss = args.v5_s1_align_poss)
+            indices_to_process = _filter_indices_by_resume(train_dataset, args, align_poss = args.sft_stage2_align_poss)
             total = len(indices_to_process)
             if rank == 0:
                 logging.info(f"[resume] filtered unfinished samples: {total} remain (out of {len(train_dataset)}).")
@@ -308,9 +285,9 @@ def main():
                 try:
                     examples = [train_dataset[j] for j in cur_ids]
                     batch = collate_fn_precompute_teacher_rep(examples)
-                    if args.v5_s1_align_poss == 'obs':
+                    if args.sft_stage2_align_poss == 'obs':
                         alignment_poss = batch['teacher_observation_poss']
-                    elif args.v5_s1_align_poss == 'latent_end':
+                    elif args.sft_stage2_align_poss == 'latent_end':
                         alignment_poss = batch['latent_end_poss']
                     inputs = {
                         'latent_mode': False,
@@ -343,9 +320,9 @@ def main():
                             metadata_info = f"last_layer_{dataset_name}_{sample_id}"
                         elif args.output_hidden_states:
                             metadata_info = f"all_layers_{dataset_name}_{sample_id}"
-                        if args.v5_s1_align_poss == 'obs':
+                        if args.sft_stage2_align_poss == 'obs':
                             metadata_str = f"rep_{metadata_info}.pt"
-                        elif args.v5_s1_align_poss == 'latent_end':
+                        elif args.sft_stage2_align_poss == 'latent_end':
                             metadata_str = f"rep_latent_end_{metadata_info}.pt"
                         save_path = os.path.join(out_dir, metadata_str)
                         torch.save({'metadata_info': metadata_info, 'latent': teacher_reps[b].detach().cpu()}, save_path)

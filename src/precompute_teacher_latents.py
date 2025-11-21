@@ -1,28 +1,3 @@
-'''
-
-export CUDA_HOME=/usr/local/cuda-12.6
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
-conda activate mirage
-cd /home/dids/shiyang/codes/abstract-visual-token
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-export TOKENIZERS_PARALLELISM=false
-CKPT=avt_v2_stage1/9.26_tiny_avt_v2_stage1_latent12_ce5.0_align-wt0.0001_emph-wt2.0
-torchrun --nproc-per-node=4 --master-port=29501 -m src.precompute_teacher_latents \
-    --bsz 1 \
-    --task "mm-reasoning" \
-    --data_path \
-    "./new/created_dataset/filtered_data/CoM_w_MathVista/filtered_train_w_metadata_9.1.json" \
-  "./new/created_dataset/filtered_data/ReFocus/filtered_train_w_metadata_9.1.json" \
-  "./new/created_dataset/filtered_data/Zebra_CoT_visual_search/filtered_train_w_metadata_9.24_further_washed.json" \
-    --log_file "./log.txt" \
-    --load_model_path /home/dids/shiyang/checkpoints/${CKPT} \
-    --save_model_path ./new/precomputed_teacher_latents/${CKPT} \
-    --deepspeed ./deepspeed/ds_zero2_gpu.json \
-    --output_hidden_states
-
-'''
-
 import os as _early_os
 # Also import standard os for later usages in this file
 import os
@@ -150,10 +125,10 @@ def collate_fn_precompute_teacher_latents(examples):
     texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace `<abs_vis_token></abs_vis_token>`` with `<|vision_start|><|image_pad|><|vision_end|>`` for each `<|im_start|>assistant`` content
-    texts = [place_output_image_avt(text) for text in texts]
+    texts = [replace_latent_placeholder_with_img_pad(text) for text in texts]
     
     # add `<abs_vis_token><abs_vis_token_pad>...</abs_vis_token>` after each `<|vision_start|><|image_pad|><|vision_end|>` for each `<|im_start|>assistant` content
-    texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
+    texts = add_latent_pad_after_auxiliary_img(texts, args.latent_size, "<abs_vis_token_pad>")
     
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":

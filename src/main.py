@@ -144,7 +144,7 @@ def collate_fn_sft_stage1(examples):
     texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
-    texts = [place_output_image_avt(text) for text in texts]
+    texts = [replace_latent_placeholder_with_img_pad(text) for text in texts]
     #pdb.set_trace()
     ################################################
     # teacher
@@ -190,14 +190,14 @@ def collate_fn_sft_stage2(examples):
     texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace `<abs_vis_token></abs_vis_token>`` with `<|vision_start|><|image_pad|><|vision_end|>`` for each `<|im_start|>assistant`` content
-    texts = [place_output_image_avt(text) for text in texts]
+    texts = [replace_latent_placeholder_with_img_pad(text) for text in texts]
     
     # add `<abs_vis_token><abs_vis_token_pad>...</abs_vis_token>` after each `<|vision_start|><|image_pad|><|vision_end|>` for each `<|im_start|>assistant` content
-    texts = add_abs_vis_token_after_helper_img(texts, args.latent_size, "<abs_vis_token_pad>")
+    texts = add_latent_pad_after_auxiliary_img(texts, args.latent_size, "<abs_vis_token_pad>")
     
     image_inputs, _ = process_vision_info(examples)
     if args.image_resize == "global":
-        image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=args.v5_s1_global_img_tokens*28*28, per_img_max_pixels=args.v5_s1_per_img_tokens*28*28)
+        image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=args.sft_stage2_global_img_tokens*28*28, per_img_max_pixels=args.sft_stage2_per_img_tokens*28*28)
     elif args.image_resize == "clear_question_img":
         image_inputs, new_sizes = resize_diff(image_inputs)
 
@@ -222,7 +222,7 @@ def collate_fn_sft_stage2(examples):
         )
         batch["attention_mask_4d"] = {"full_attention": attn_mask_4d }
 
-    if args.v5_s1_align_poss == 'latent_end':
+    if args.sft_stage2_align_poss == 'latent_end':
         batch["latent_end_poss"] = find_ids_poss(batch["input_ids"], answer_start_pattern, latent_end_idx)
     
     observation_start_poss = find_ids_poss(batch["input_ids"], answer_start_pattern, observation_start_idx)
@@ -255,16 +255,16 @@ def collate_fn_sft_stage3(examples, alignment="boxed_start"):
     texts = [processor.apply_chat_template(ex, tokenize=False) for ex in examples]
 
     # replace <abs_vis_token></abs_vis_token> with <|vision_start|><|image_pad|><|vision_end|> for each <|im_start|>assistant content
-    texts = [place_output_image_avt(text) for text in texts]
+    texts = [replace_latent_placeholder_with_img_pad(text) for text in texts]
     image_inputs, _ = process_vision_info(examples)
-    image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=args.v5_s2_img_tokens*28*28, per_img_max_pixels=args.v5_s2_img_tokens*28*28,)
+    image_inputs, new_sizes = resize_by_token_budget(image_inputs, global_max_pixels=args.sft_stage3_img_tokens*28*28, per_img_max_pixels=args.sft_stage3_img_tokens*28*28,)
     
     ################################################
     # student
     ################################################
     # replace <|vision_start|><|image_pad|><|vision_end|> with <abs_vis_token><abs_vis_token_pad>...</abs_vis_token> for each <|im_start|>assistant content
-    student_texts = replace_visual_spectial_tokens_avt(texts, args.latent_size, "<abs_vis_token_pad>")
-    user_examples = remove_assistant_images(examples)
+    student_texts = replace_img_pad_with_latent_pad(texts, args.latent_size, "<abs_vis_token_pad>")
+    user_examples = remove_auxiliary_images(examples)
     user_image_inputs, _ = process_vision_info(user_examples)
     resize_ptr = 0
     b_ptr = 0
@@ -426,7 +426,7 @@ elif args.stage in ['sft_stage2','sft_stage3']:
     setattr(training_args, 'teacher_reps_dir', args.teacher_reps_dir)
     setattr(training_args, 'teacher_latent_dir', args.teacher_latent_dir)
     setattr(training_args, 'image_resize', args.image_resize)
-    setattr(training_args, 'v5_s1_align_poss', args.v5_s1_align_poss)
+    setattr(training_args, 'sft_stage2_align_poss', args.sft_stage2_align_poss)
 
 # Initialize the trainer (callbacks that need trainer instance will be added after)
 trainer = CustomTrainer(
