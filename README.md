@@ -17,7 +17,7 @@
       <img src='https://img.shields.io/badge/Paper-PDF-red?style=flat&logo=arXiv&logoColor=red' alt='Paper PDF'>
     </a>
     <a href="https://huggingface.co/NOVAglow646/Monet-7B" target="_blank" rel="noopener noreferrer">
-      <img src="https://img.shields.io/badge/Model-HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=orange" alt="HF Model">
+      <img src="https://img.shields.io/badge/Model-Monet-7B-FFD21E?style=flat&logo=huggingface&logoColor=orange" alt="HF Model">
     </a>
     <a href="https://huggingface.co/datasets/YourOrg/YourDataset" target="_blank" rel="noopener noreferrer">
       <img src="https://img.shields.io/badge/Dataset-HuggingFace-FFD21E?style=flat&logo=huggingface&logoColor=orange" alt="HF Dataset">
