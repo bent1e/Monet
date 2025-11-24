@@ -4,11 +4,13 @@ os.environ["VLLM_NO_USAGE_STATS"] = "1"  # disable usage stats
 workspace = os.path.abspath(".")
 old_path = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = f"{workspace}:{old_path}" if old_path else workspace
-os.environ["ABS_VIS_START_ID"] = "151666"
-os.environ["ABS_VIS_END_ID"] = "151667"
+os.environ["LATENT_START_ID"] = "151666"
+os.environ["LATENT_END_ID"] = "151667"
 try:
-    # Import your patched runner by module name
+    # apply Monet transformers model patch
     patched = importlib.import_module("new.monet_qwen_model.vllm.monet_gpu_model_runner")
+   
+    # apply Monet vLLM GPU model runner patch
     for key in (
         "vllm.v1.worker.gpu_model_runner",
         "vllm.worker.gpu_model_runner",

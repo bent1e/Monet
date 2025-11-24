@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-print("Replaced the original vllm gpu_model_runner with the AVT version.")
+print("Replaced the original vllm gpu_model_runner with the Monet version.")
 import copy
 import gc
 import time
@@ -322,26 +322,28 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         # --- ABS-VIS special segment (token-delimited hidden-state feeding) ---
         # Enable with environment variables:
-        #   ABS_VIS_START_ID, ABS_VIS_END_ID (both ints)
+        #   LATENT_START_ID, LATENT_END_ID (both ints)
         # Only effective for multimodal models on single PP rank (first==last).
-        start_id = os.getenv("ABS_VIS_START_ID")
-        end_id = os.getenv("ABS_VIS_END_ID")
-        print(f"start_id={start_id} end_id={end_id}")
+        start_id = os.getenv("LATENT_START_ID")
+        end_id = os.getenv("LATENT_END_ID")
+        latent_size = int(os.getenv("LATENT_LATENT_SIZE", 0))
+        print(f"start_id={start_id} end_id={end_id}, latent_size={latent_size}")
         try:
-            self.abs_vis_start_id: Optional[int] = (
+            self.latent_start_id: Optional[int] = (
                 int(start_id) if start_id is not None else None)
         except ValueError:
-            self.abs_vis_start_id = None
+            self.latent_start_id = None
         try:
-            self.abs_vis_end_id: Optional[int] = (
+            self.latent_end_id: Optional[int] = (
                 int(end_id) if end_id is not None else None)
         except ValueError:
-            self.abs_vis_end_id = None
-        self.abs_vis_enabled: bool = (
-            self.abs_vis_start_id is not None
-            and self.abs_vis_end_id is not None)
+            self.latent_end_id = None
+        self.latent_enabled: bool = (
+            self.latent_start_id is not None
+            and self.latent_end_id is not None)
         # req_id -> {"active": bool, "pending": Optional[torch.Tensor]}
-        self.abs_vis_state: dict[str, dict[str, Any]] = {}
+        self.latent_state: dict[str, dict[str, Any]] = {}
+        self.latent_size = latent_size
 
     def _may_reorder_batch(self, scheduler_output: "SchedulerOutput") -> None:
         """
@@ -1430,7 +1432,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             self.inputs_embeds[:num_scheduled_tokens].copy_(inputs_embeds)
 
             # ABS-VIS: override next-step inputs with pending hidden states
-            if (self.abs_vis_enabled and get_pp_group().is_last_rank
+            if (self.latent_enabled and get_pp_group().is_last_rank
                     and not self.speculative_config):
                 # Only safe on single PP rank (first==last); guard otherwise
                 if len(get_pp_group().ranks) == 1:
@@ -1441,7 +1443,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                     override_indices = []
                     override_embeds = []
                     for i, req_id in enumerate(self.input_batch.req_ids):
-                        st = self.abs_vis_state.get(req_id)
+                        st = self.latent_state.get(req_id)
                         if st and st.get("active") and st.get("pending") is not None:
                             override_indices.append(rows_cpu[i].item())
                             override_embeds.append(st["pending"])  # Tensor [H]
@@ -1453,10 +1455,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                         self.inputs_embeds.index_copy_(0, idx, embeds)
                         # Clear pending after consumed
                         for req_id in self.input_batch.req_ids:
-                            st = self.abs_vis_state.get(req_id)
+                            st = self.latent_state.get(req_id)
                             if st and st.get("active"):
                                 st["pending"] = None
-
             inputs_embeds = self.inputs_embeds[:num_input_tokens]
             input_ids = None
         else:
@@ -1638,7 +1639,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             valid_sampled_token_ids[i].clear()
 
         # ABS-VIS: update per-request state and capture pending embeddings
-        if (self.abs_vis_enabled and not self.speculative_config
+        if (self.latent_enabled and not self.speculative_config
                 and len(get_pp_group().ranks) == 1
                 and get_pp_group().is_last_rank):
             # hidden_states shape: [num_input_tokens, H]; logits_indices -> last positions per req
@@ -1646,18 +1647,18 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             last_token_h = sample_hidden_states  # [num_reqs, H] in pure decode
             # Iterate in batch order
             for i, req_id in enumerate(self.input_batch.req_ids):
-                st = self.abs_vis_state.setdefault(req_id, {"active": False, "pending": None, "current_len": 0})
+                st = self.latent_state.setdefault(req_id, {"active": False, "pending": None, "current_len": 0})
                 # Detect boundaries from sampled ids of this step
                 gen_ids = valid_sampled_token_ids[i]
                 # Multiple tokens per req is unusual without spec; handle 0/1 robustly
                 for j, tid in enumerate(gen_ids):
-                    if not st["active"] and tid == self.abs_vis_start_id:
+                    if not st["active"] and tid == self.latent_start_id:
                         st["active"] = True
-                    elif st["active"] and (tid == self.abs_vis_end_id or st["current_len"] > 20):
+                    elif st["active"] and (tid == self.latent_end_id or st["current_len"] >= self.latent_size):
                         st["active"] = False
                         st["pending"] = None
                         st["current_len"] = 0
-                        gen_ids[j] = self.abs_vis_end_id
+                        valid_sampled_token_ids[i] = [self.latent_end_id]
                 # If currently active, set pending for next step from this step's last position
                 if st["active"] and last_token_h is not None and i < last_token_h.shape[0]:
                     # store a detached 1D tensor [H]

@@ -20,7 +20,7 @@
       <img alt="HF Model: ViGaL" src="https://img.shields.io/badge/%F0%9F%A4%97%20_Model-Monet7B-ffc107?color=ffc107&logoColor=white" height="20" />
     </a>
     <a href="https://huggingface.co/datasets/NOVAglow646/Monet-SFT-125K" target="_blank">
-    <img alt="HF Model: ViGaL" src="https://img.shields.io/badge/%F0%9F%A4%97%20_Model-MonetSFT125K-ffc107?color=ffc107&logoColor=white" height="20" />
+    <img alt="HF Model: ViGaL" src="https://img.shields.io/badge/%F0%9F%A4%97%20_Data-MonetSFT125K-ffc107?color=ffc107&logoColor=white" height="20" />
     </a>
 
   </p>
@@ -42,7 +42,7 @@
       <a href="#installation">Installation</a>
     </li>
     <li>
-      <a href="#data-preparation">Data Preparation</a>
+      <a href="#training-data">Data Preparation</a>
     </li>
     <li>
       <a href="#training">Training</a>
@@ -59,6 +59,13 @@
   </ol>
 </details>
 
+## Overview
+To support latent reasoning, we use customized Qwen2.5-VL-7B model to replace the official code in Transformers and vLLM, which is done by using a `sitecustomize.py`.
+
+* [Modified Transformers model: ./new/monet_qwen_model/modeling_qwen2_5_vl_monet.py](./new/monet_qwen_model/modeling_qwen2_5_vl_monet.py)
+* [Modified vLLM model: ./new/monet_qwen_model/vllm/monet_gpu_model_runner.py](./new/monet_qwen_model/vllm/monet_gpu_model_runner.py)
+
+
 ## Installation
 Create a conda environment and install the required packages:
 ```bash
@@ -69,6 +76,11 @@ git clone https://github.com/NOVAglow646/Monet.git
 cd Monet
 pip install -r requirements.txt
 ```
+
+## Training Data
+* [SFT data (Monet-SFT-125K)](https://huggingface.co/datasets/NOVAglow646/Monet-SFT-125K/tree/main)
+* [RL data (Thyme-RL)](https://huggingface.co/datasets/Kwai-Keye/Thyme-RL)
+
 
 
 
@@ -81,8 +93,6 @@ The inference requires replacing the official code of vLLM.
 
 
 ## Citation
-If you find our work useful, please consider citing: 
-
 ```bibtex
 @article{yang2025machine,
   title={Machine Mental Imagery: Empower Multimodal Reasoning with Latent Visual Tokens}, 
