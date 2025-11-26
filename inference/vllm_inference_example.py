@@ -5,7 +5,7 @@ import os
 import PIL
 import re
 model_path = '/ytech_m2v8_hdd/workspace/kling_mm/shiyang06/Monet/checkpoint/final/Monet-7B'
-
+model_path = '/ytech_m2v8_hdd/workspace/kling_mm/shiyang06/Monet/Easyr1-temp/checkpoints/easy_r1/AVTv5_rw-3884-1000-1000-poolfixed_latent10_temp0.5_tacc0.6_rlsgm10.0_APIjudge_lenPenalty0.001_use-lat-rwd_repe-penalty/global_step_50/actor/huggingface'
 def replace_abs_vis_token_content(s: str) -> str:
     pattern = re.compile(r'(<abs_vis_token>)(.*?)(</abs_vis_token>)', flags=re.DOTALL)
     return pattern.sub(r'\1<latent>\3', s)
