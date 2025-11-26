@@ -2,7 +2,8 @@ conda activate monet
 cd Monet
 
 
-# precompute target latent embeddings using the model trained in SFT Stage2
+# STEP 1: precompute target latent embeddings using the model trained in SFT Stage2
+STAGE1_MODEL=sft_stage1_ce2.0
 TEACHER_LATENT_SIZE=8
 TEACHER_CE_EMPHASIZE_FACTOR=4.0
 TEACHER_ALIGN_WEIGHT=2.0
@@ -17,9 +18,8 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.precompute_teacher_latent
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_count/train.json" \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_visual_search/train.json" \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_geometry/train.json" \
-  --log_file "./log.txt" \
-  --load_model_path path_to_your_model/${TEACHER} \
-  --save_model_path path_to_your_model/monet_precomputed_target_latent/${TEACHER} \
+  --load_model_path path_to_your_model/Monet_checkpoints/sft_stage2/${TEACHER} \
+  --save_model_path path_to_your_model/Monet_checkpoints/monet_precomputed_target_latent/${TEACHER} \
   --dataset_root path_to_your_dataset \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --latent_size ${LATENT_SIZE} \
@@ -28,7 +28,7 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.precompute_teacher_latent
 
 
 
-# SFT stage3
+# STEP 2: SFT stage3 training
 LATENT_SIZE=8
 CE_EMPHASIZE_FACTOR=4.0
 ALIGNMENT_WEIGHT=2.0
@@ -47,13 +47,13 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_visual_search/train.json" \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_geometry/train.json" \
   --log_file "./log.txt" \
-  --load_model_path path_to_your_model/sft_stage1_ce2.0 \
-  --save_model_path path_to_your_model/${SAVE_CKPT} \
+  --load_model_path path_to_your_model/Monet_checkpoints/sft_stage1${STAGE1_MODEL} \
+  --save_model_path path_to_your_model/Monet_checkpoints/sft_stage3/${SAVE_CKPT} \
   --dataset_root path_to_your_dataset/Monet-SFT-125K \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --wandb_name ${SAVE_CKPT} \
   --latent_size ${LATENT_SIZE} \
   --alignment_weight ${ALIGNMENT_WEIGHT} \
   --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
-  --teacher_latent_dir path_to_your_model/monet_precomputed_target_latent/${TEACHER} \
+  --teacher_latent_dir path_to_your_model/Monet_checkpoints/monet_precomputed_target_latent/${TEACHER} \
   --alignment_layer all_layers

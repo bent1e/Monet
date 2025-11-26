@@ -26,9 +26,7 @@ def get_args():
     parser.add_argument("--num_samples", default=-1, help="-1 means all data", type=int)
     parser.add_argument("--max_seq_len", type=int, default=4096, help="Maximum allowed sequence length after processing.")
     parser.add_argument("--image_resize", type=str, choices=["global", "clear_question_img"], default="global")
-    parser.add_argument("--s" \
-    "" \
-    "e_freq", type=int, default=250)
+    parser.add_argument("--save_freq", type=int, default=250)
     parser.add_argument("--log_freq", default=10, type=int)
     parser.add_argument("--allow_no_observation", action='store_true', default=False)
     # ===== Basic training hyperparameters =====

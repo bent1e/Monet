@@ -16,9 +16,8 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_count/train.json" \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_visual_search/train.json" \
     "path_to_your_dataset/Monet-SFT-125K/Zebra_CoT_geometry/train.json" \
-  --log_file "./log.txt" \
   --load_model_path path_to_your_model/Qwen2.5-VL-7B-Instruct \
-  --save_model_path path_to_your_model/${SAVE_CKPT} \
+  --save_model_path path_to_your_model/Monet_checkpoints/sft_stage1/${SAVE_CKPT} \
   --dataset_root path_to_your_dataset/Monet-SFT-125K \
   --deepspeed ./deepspeed/ds_zero2_gpu.json \
   --wandb_name ${SAVE_CKPT} \

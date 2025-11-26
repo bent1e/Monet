@@ -20,7 +20,7 @@ flash-attn==2.6.3
 torch==2.6.0
 wandb
 antlr4-python3-runtime==4.11.1
-
+modelscope
 pyparsing
 word2number
 timeout_decorator

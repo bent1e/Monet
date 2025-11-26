@@ -17,9 +17,7 @@ from PIL import Image
 
 
 # quick setup of the parameters
-# model setup
-max_num_seqs = 1024 # processing speed
-#tp = 4
+max_num_seqs = 512
 temperature = 0.1
 top_k = 50
 top_p = 0.8
@@ -31,8 +29,7 @@ swap_space = 7
 seed = 0
 stop = None
 
-qwen_series = ["Qwen2.5-VL-7B", "Qwen2-VL-7B", "ThinkLite-VL-7B", "Vision-R1", "qwen", "VL-Rethinker-7B"]
-max_pixels = 1280*28*28
+max_pixels = 2000*28*28
 min_pixels = 256*28*28
 
 

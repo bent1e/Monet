@@ -107,7 +107,7 @@ def _api_call_wrapper(
             # Print stack trace for debugging and continue retrying
             traceback.print_exc()
             #print("######################################################")
-            print(f"{e}")
+            print(f"API judge error: {e}")
             continue
 
     # All attempts failed to yield a usable response -> let caller decide
@@ -178,7 +178,7 @@ def api_batch_judge(
     
     # Prepare and launch parallel API judging
     #pdb.set_trace()
-    with cf.ProcessPoolExecutor(max_workers=max_workers) as ex:
+    with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = []
         for i in range(n):
             fut = ex.submit(

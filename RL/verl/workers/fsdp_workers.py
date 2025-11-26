@@ -14,7 +14,7 @@
 """
 The main entry point to run the PPO algorithm
 """
-
+import monet_rl_patch
 from typing import Literal, Optional, Union, List
 
 import numpy as np
@@ -66,9 +66,9 @@ from transformers import AutoTokenizer, AutoModel, AutoConfig, GenerationConfig
 from transformers.configuration_utils import PretrainedConfig
 import torch.nn.functional as F
 from tqdm import tqdm
-from Monet.RL.examples.reward_function.monet_reward_function import extract_and_check as easyr1_monet_extract_and_check
-from Monet.RL.examples.reward_function.monet_reward_function import extract_and_check_api as easyr1_monet_extract_and_check_api
-from Monet.RL.examples.reward_function.monet_reward_function import rule_then_api_batch_judge
+from examples.reward_function.monet_reward_function import extract_and_check as easyr1_monet_extract_and_check
+from examples.reward_function.monet_reward_function import extract_and_check_api as easyr1_monet_extract_and_check_api
+from examples.reward_function.monet_reward_function import rule_then_api_batch_judge
 from tools.custom_api import build_deepseek_client, build_gemini_client
 from vllm import LLM
 from openai import OpenAI

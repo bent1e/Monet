@@ -1,12 +1,10 @@
 from trl import SFTTrainer, SFTConfig
 from typing import Optional
-from transformers import TrainerCallback
 import logging
 import torch
 import os, csv, torch, datetime
 import gc
 import numpy as np
-from .utils import SFTRepAnalyzer
 import math
 from time import time
 
@@ -43,7 +41,7 @@ def compute_latents_only_loss(latents, loss_for_latents):
     proxy_loss = torch.stack([(v * g).sum() for v, g in zip(ce_vec_list, safe_grads)]).sum()
     return proxy_loss
 
-def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers", rep_type="rep", v5_s1_align_poss="obs"):
+def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers", rep_type="rep", align_poss="obs"):
     '''
     Load precomputed teacher representations (observation tokens for the alignment in SFT stage 2 or the latent embeddings for SFT stage 3)
     '''
@@ -53,9 +51,9 @@ def load_offline_tensor(tensor_dir, batch_metadata, alignment_layer="all_layers"
         dataset_name = metadata['dataset_name']
         sample_id = metadata['sample_id']
         metadata_info = f"{alignment_layer}_{dataset_name}_{sample_id}"
-        if v5_s1_align_poss == 'obs':
+        if align_poss == 'obs':
             metadata_str = f"{rep_type}_{metadata_info}.pt"
-        elif v5_s1_align_poss == 'latent_end':
+        elif align_poss == 'latent_end':
             metadata_str = f"{rep_type}_latent_end_{metadata_info}.pt"
         path = os.path.join(tensor_dir, metadata_str)
         if not os.path.isfile(path):
@@ -185,11 +183,9 @@ class CustomTrainerSFT_STAGE2(SFTTrainer):
         if self.args.alignment_weight != 0:
             # Load precomputed teacher representations of observation tokens for alignment loss
             teacher_reps = load_offline_tensor(self.args.teacher_reps_dir, batch_metadata=inputs['metadata'], 
-            alignment_layer=self.args.alignment_layer, v5_s1_align_poss=self.args.v5_s1_align_poss)
-            if self.args.v5_s1_align_poss == 'obs':
-                inputs['alignment_poss'] = inputs['observation_poss']
-            elif self.args.v5_s1_align_poss == 'latent_end':
-                inputs['alignment_poss'] = inputs['latent_end_poss']
+            alignment_layer=self.args.alignment_layer)
+            inputs['alignment_poss'] = inputs['observation_poss']
+
             inputs['teacher_hidden_states_for_alignment'] = teacher_reps
 
         teacher_ce_loss, teacher_output = super().compute_loss(

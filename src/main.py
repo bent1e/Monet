@@ -337,18 +337,8 @@ for data_path in args.data_path:
     dataset_name = data_path.split("/")[-2]
     dataset_names += f"-{dataset_name}"
 
-# Automatically construct save name with the hyperparameters
-exp_name = f"{args.stage}-ep{args.epochs}-bsz{args.bsz}-lr{args.lr}"
 
-if args.stage == "sft_stage1":
-    exp_name += f"-ce_emphasize_{args.ce_emphasize_factor}-warmup_{args.ce_emphasize_warmup_steps}"
-
-if args.shuffle_train:
-    exp_name += "-shuffle"
-
-save_dir = f"./checkpoints/{exp_name}"
-if args.save_model_path != './checkpoints/':
-    save_dir = args.save_model_path
+save_dir = args.save_model_path
 
 if args.stage == 'sft_stage1':
     CustomTrainer = CustomTrainerSFT_STAGE1
@@ -424,7 +414,7 @@ trainer = CustomTrainer(
     train_dataset=train_dataset,
     data_collator=collate_fn,
     processing_class=processor,
-    exp_name=exp_name,
+    exp_name=args.save_model_path.split('/')[-1]
 )
 
 

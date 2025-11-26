@@ -343,15 +343,9 @@ class RayPPOTrainer:
 
             # Store generated outputs
             output_ids = test_output_gen_batch.batch["responses"]
-            # (output_ids[3]==151666).nonzero()
-            # (output_ids[3]==151667).nonzero()
-            # output_texts[5]
-            #breakpoint()
-            
+
             output_texts = [replace_abs_vis_token_content(self.tokenizer.decode(ids, skip_special_tokens=False)).replace("<|endoftext|>", "").replace("<|im_end|>", "") for ids in output_ids]
-            # self.tokenizer.decode(output_ids[5], skip_special_tokens=False).replace("<|endoftext|>", "").replace("<|im_end|>", "")
-            #breakpoint() replace_abs_vis_token_content(self.tokenizer.decode(output_ids[1], skip_special_tokens=False)).replace("<|endoftext|>", "").replace("<|im_end|>", "")
-            #pdb.set_trace()
+
             sample_outputs.extend(output_texts)
             sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
             test_batch = test_batch.union(test_output_gen_batch)

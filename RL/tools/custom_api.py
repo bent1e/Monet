@@ -8,6 +8,10 @@ import json
 
 from google import genai
 
+import logging
+for name in ["openai", "openai._client", "httpx", "httpcore"]:
+    logging.getLogger(name).setLevel(logging.WARNING)
+
 gemini_generation_config = {"max_output_tokens": 9000, "temperature": 0.3, "top_p": 1.0}
 
 
@@ -66,17 +70,20 @@ def get_deepseek_response(client, sys_prompt, user_prompts, temperature=0.3, mod
         desc="Processing user prompts using DeepSeek api",
         total=len(user_prompts),
     ):'''
-    for user_prompt in user_prompts:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            stream=False,
-        )
-        responses.append(response.choices[0].message.content)
+    try:
+        for user_prompt in user_prompts:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                stream=False,
+            )
+            responses.append(response.choices[0].message.content)
+    except Exception as e:
+        print(f"Deepseek API judge error: {e}")
     return responses
 
 def get_api_response(api_model_name, sys_prompt, user_prompts, client=None, temperature=0.3):

@@ -22,3 +22,4 @@ opencv-python-headless
 fastapi
 uvicorn
 pydantic
+modelscope

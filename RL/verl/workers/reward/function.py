@@ -112,7 +112,7 @@ class BatchFunctionRewardManager(FunctionRewardManager):
         response_length = data.batch["response_mask"].sum(dim=-1)
         for i in range(len(data)):
             valid_response_ids = response_ids[i][: response_length[i]]
-            if "avt" in self.config.reward_function:
+            if "monet" in self.config.reward_function:
                 response_str_=replace_abs_vis_token_content(self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)).replace("<|endoftext|>", "").replace("<|im_end|>", "")
             else:
                 response_str_=self.tokenizer.decode(valid_response_ids, skip_special_tokens=self.config.skip_special_tokens)
@@ -138,7 +138,7 @@ class BatchFunctionRewardManager(FunctionRewardManager):
             ref_resp_lengths=data.non_tensor_batch["ref_resp_lengths"],
             **extra_kwargs,
             )
-        elif "correctness" in data.non_tensor_batch:  # avt List[bool]
+        elif "correctness" in data.non_tensor_batch:
             #pdb.set_trace()
             scores = self.reward_fn(
             response_str,

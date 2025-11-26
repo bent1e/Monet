@@ -3,8 +3,13 @@ import PIL.Image
 from inference.load_and_gen_vllm import *
 import os
 import PIL
+import re
+model_path = '/ytech_m2v8_hdd/workspace/kling_mm/shiyang06/Monet/checkpoint/final/Monet-7B'
 
-model_path = '/home/dids/shiyang/checkpoints/Qwen2.5-VL-7B-Instruct-avt_stage1-08_17-6-20-30-wt1.0-ce_emphasize3.0'
+def replace_abs_vis_token_content(s: str) -> str:
+    pattern = re.compile(r'(<abs_vis_token>)(.*?)(</abs_vis_token>)', flags=re.DOTALL)
+    return pattern.sub(r'\1<latent>\3', s)
+
 
 def main():
     
@@ -26,7 +31,9 @@ def main():
 
     inputs = vllm_mllm_process_batch_from_messages(conversations, processor)
     output = vllm_generate(inputs, sampling_params, mllm)
-    print(output[0].outputs[0].text)
+    raw_output_text = output[0].outputs[0].text    
+    cleaned_output_text = replace_abs_vis_token_content(raw_output_text)
+    print(cleaned_output_text)
 
 
 

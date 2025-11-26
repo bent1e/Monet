@@ -7,11 +7,12 @@ sft_analysis/
 logs/
 scripts/
 wandb/
+script_examples/debug/
 
 RL/tensorboard_log/
 RL/checkpoints/
 RL/training_logs/
-
+RL/examples/debug/
 
 
 # Byte-compiled / optimized / DLL files

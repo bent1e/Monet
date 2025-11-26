@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import apply_monet_vllm
+import monet_rl_patch
 import json
 import pdb
 import ray

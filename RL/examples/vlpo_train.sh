@@ -5,8 +5,8 @@ set -x
 
 
 export PYTHONUNBUFFERED=1
-export WANDB_API_KEY=0bc4e54288b51054cdf77a4a48e49880984a6ca7
-export DEEPSEEK_API_KEY=sk-a62bc7c0899a47dba605e3d3ab332e37
+export WANDB_API_KEY=your_wandb_api_key
+export DEEPSEEK_API_KEY=your_deepseek_api_key
 export monet_DEBUG=0
 
 unset LD_PRELOAD
@@ -32,11 +32,10 @@ export RAY_TMPDIR=/tmp/ray_tmp
 mkdir -p /tmp/ray_spill /tmp/ray_tmp
 export RAY_OBJECT_STORE_MEMORY=134217728
 export RAY_WORKER_REGISTER_TIMEOUT_SECONDS=300
-source /ytech_m2v5_hdd/workspace/kling_mm/shiyang06/Lib/miniconda3/bin/activate
 conda easyr1
-cd /mmu_vcg_ssd/shiyang06-temp/Latent_Think/Easyr1-temp
+cd Monet/RL
 
-
+MONET_RL_PATCH=1 # overwrite the transformers and vllm forward module
 MODEL_PATH=path_to_your_model/Monet-7B
 latent_size=10
 export LATENT_SIZE=${latent_size}
@@ -45,10 +44,10 @@ TEMPERATURE=0.5
 GPU_UTILIZATION=0.85
 SELECT_ACC_THRESHOLD=0.6
 KL_COEF=0.01
-ORI_BSZ=64 # 32
-ONLINE_ACCUM_SIZE=256 # 128
-TRAIN_MAX_SAMPLES=-1 # 512
-VAL_MAX_SAMPLES=-1 # 16
+ORI_BSZ=64
+ONLINE_ACCUM_SIZE=256
+TRAIN_MAX_SAMPLES=-1
+VAL_MAX_SAMPLES=-1
 N_GPUS_PER_NODE=8
 TENSOR_PARALLEL_SIZE=1
 MONET_RL_SIGMA=10.0

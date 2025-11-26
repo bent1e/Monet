@@ -1,12 +1,10 @@
 import pprint
 import re
 from word2number import w2n
-from __future__ import annotations
 from typing import List, Dict, Any, Optional, Type, Tuple, Union
 #from math_evaluation import is_equiv
 from verl.workers.rollout.utils.math_equal import math_equal
 from verl.workers.rollout.utils.checker import check_one_answer
-from verl.workers.rollout.utils.util import equiv, strip_string, choice_answer_clean
 import re
 
 

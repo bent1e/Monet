@@ -14,7 +14,7 @@
 """
 Implement Actor
 """
-
+import monet_rl_patch
 import math
 import os
 from collections import defaultdict
@@ -189,7 +189,7 @@ class DataParallelPPOActor(BasePPOActor):
         responses = micro_batch["responses"]
         latent_poss = None
         latents = None
-        if self.config.sampling_strategy == 'avt' and not self.config.ablate_latent:
+        if self.config.sampling_strategy == 'monet' and not self.config.ablate_latent:
             try:
                 latent_poss = []
                 start_id = int(os.getenv("ABS_VIS_START_ID"))
@@ -199,10 +199,6 @@ class DataParallelPPOActor(BasePPOActor):
                     attention_mask=micro_batch["attention_mask"],
                     start_id=start_id, end_id=end_id,
                 )
-
-                #latent_cnt = sum([1 for lat in micro_batch['latents'] if lat is not None])
-                #if len(latent_poss) != latent_cnt:
-                #    print(f"[WARNING] Number of latents {latent_cnt} != number of latent pad segments {len(latent_poss)}. Skip this mirco batch for latent policy gradient computing.")
 
                 latents_list, per_sample = [], []
                 for i, lat in enumerate(micro_batch['latents']):
@@ -219,14 +215,13 @@ class DataParallelPPOActor(BasePPOActor):
                 if len(latents_list) > 0 and len(latent_poss) > 0:
                     latent_poss = torch.cat(latent_poss, dim=0)
                     latents = torch.cat(latents_list, dim=0).to(input_ids.device)
-                    #if os.getenv("AVT_DEBUG") == "1":
+
                     if latents.shape[0] != latent_poss.shape[0]:
                         print(f"[WARNING] latents.shape[0] != latent_poss.shape[0], per-sample (idx, lat, poss)={per_sample}, total lat={latents.shape[0]}, poss={int(latent_poss.numel())}. Skip this mirco batch for latent policy gradient computing", flush=True)
                         output_hidden_states = False
                         latent_poss = None
                         latents = None
-                        #if self.rank == 0:
-                        #    pdb.set_trace()
+
                 else:
                     latent_poss = None
                 
@@ -302,9 +297,9 @@ class DataParallelPPOActor(BasePPOActor):
             #breakpoint()
             # ((total_nnz / sp) + pad)
             log_probs = self.log_probs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
-            if self.config.sampling_strategy == 'avt' and not self.config.ablate_latent:
+            if self.config.sampling_strategy == 'monet' and not self.config.ablate_latent:
                 if latents is not None:
-                    latent_log_probs = compute_latent_log_probs(latent_poss, latents, output.hidden_states[-1], sigma=self.config.avt_rl_sigma)
+                    latent_log_probs = compute_latent_log_probs(latent_poss, latents, output.hidden_states[-1], sigma=self.config.monet_rl_sigma)
                     log_probs[latent_poss] = latent_log_probs.to(log_probs.dtype)
                     #pdb.set_trace()
                     # compute_latent_log_probs(latent_poss, latents, output.hidden_states[-1], sigma=10).mean()
@@ -377,7 +372,7 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             non_tensor_select_keys = []
 
-        if self.config.sampling_strategy == "avt":
+        if self.config.sampling_strategy == "monet":
             non_tensor_select_keys.append('latents')
         #
         micro_batches = data.select(select_keys, non_tensor_select_keys).split(
@@ -408,7 +403,7 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             non_tensor_select_keys = []
         
-        if self.config.sampling_strategy == "avt":
+        if self.config.sampling_strategy == "monet":
             non_tensor_select_keys.append('latents')
 
         # Split to make minibatch iterator for updating the actor

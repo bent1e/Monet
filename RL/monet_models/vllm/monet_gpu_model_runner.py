@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-
+print("[Monet RL vllm patch] Initializing monet_gpu_model_runner...")
 import gc
 import time
 import weakref
