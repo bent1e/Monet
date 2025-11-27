@@ -63,9 +63,11 @@ We introduce <b>Monet</b>, a training framework that enables multimodal large la
   </ol>
 </details>
 
-To support latent reasoning, we use customized Qwen2.5-VL-7B model to replace the official code in Transformers and vLLM, which is done by using a `sitecustomize.py`.
+To support latent reasoning, we use customized Qwen2.5-VL-7B model to replace the official code in Transformers and vLLM.
 
 * [Modified Transformers model (for SFT Training)](./monet_qwen_model/modeling_qwen2_5_vl_monet.py)
+* [Modified Transformers model (for RL Training)](./RL/monet_models/transformers)
+* [Modified vLLM model (for RL Training)](./RL/monet_models/vllm)
 * [Modified vLLM model (for inference)](./inference/vllm/monet_gpu_model_runner.py)
 
 
@@ -120,7 +122,7 @@ Illustrations of key parameters:
 * `worker.actor.monet_rl_sigma=10.0` `worker.ref.monet_rl_sigma` VLPO $\sigma$.
 * `worker.reward.repetition_penalty=true` Penalty on repetitive meaningless outputs. Repetition detection is implemented by API.
 
-After training, use [model merging script](./RL/examples/merge_model.sh)
+After training, remember to use [model merging script](./RL/examples/merge_model.sh) to merge the parameter splits and get the final model.
 
 ### API Calling
 For RL training, we use external LLM APIs (Gemini / DeepSeek) via the helper in `RL/tools/custom_api.py` to support accurate rule-based judgement.
