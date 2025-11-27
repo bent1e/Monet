@@ -318,9 +318,7 @@ class vLLMRollout(BaseRollout):
                 )
                 response_ids = [output.token_ids for completion in completions for output in completion.outputs]
             
-            #breakpoint() non_tensor_batch['latents'][1].shape
-            
-            
+
             min_req_id = 99999
             for completion in completions:
                 min_req_id = min(min_req_id, int(completion.request_id))

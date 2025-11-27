@@ -1,5 +1,5 @@
 """
-Lightweight latent-steps hook for vLLM workers.
+This module allows emitting latent vector at each decoding step in monet_gpu_model_runner.py
 
 In-process subscribers: subscribe(fn) to receive events in the same process.
 Optional UDP publisher: set env AVT_LATENT_HOOK_UDP="host:port" and each
