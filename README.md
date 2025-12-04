@@ -193,4 +193,5 @@ We sincerely thank the following great works as they provide valuable data or co
 * [ReFoCus](https://arxiv.org/abs/2501.05452)
 * [EasyR1](https://github.com/hiyouga/EasyR1)
 * [VLMEvalKit](https://github.com/open-compass/VLMEvalKit)
+* [Mirage](https://github.com/UMass-Embodied-AGI/Mirage)
 
