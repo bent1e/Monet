@@ -35,6 +35,7 @@ We introduce <b>Monet</b>, a training framework that enables multimodal large la
 <br>
 
 ## 🔥Updates:
+* 2025.12.04 Fix typos in RL/examples/vlpo_train.sh
 * 2025.12.02 Fix typos in script_examples/sft_stage1.sh, script_examples/sft_stage2.sh, script_examples/sft_stage3.sh
 
 ## 🔍Overview
