@@ -809,5 +809,111 @@ def build_4d_attn_wo_helper_images(input_ids, pad_mask, token_ids, mask_latent: 
     return allowed.unsqueeze(1)
 
 
+from typing import List, Tuple, Dict, Any
+
+def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    # Merge overlapping/adjacent [start, end) spans.
+    if not spans:
+        return []
+    spans = sorted(spans)
+    merged = [spans[0]]
+    for s, e in spans[1:]:
+        ps, pe = merged[-1]
+        if s <= pe:  # overlap or adjacent
+            merged[-1] = (ps, max(pe, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+def strip_observation_and_track_retokenized(
+    text: str,
+    tokenizer,
+    open_tag: str = "<observation>",
+    close_tag: str = "</observation>",
+) -> Dict[str, Any]:
+    # 1) Build clean_text and record observation char spans in clean_text.
+    clean_parts: List[str] = []
+    obs_spans: List[Tuple[int, int]] = []
+
+    i = 0
+    depth = 0
+    cur_start = None
+
+    while i < len(text):
+        next_open = text.find(open_tag, i)
+        next_close = text.find(close_tag, i)
+
+        # Choose the nearest tag (open or close).
+        candidates = [(next_open, "open"), (next_close, "close")]
+        candidates = [(pos, typ) for pos, typ in candidates if pos != -1]
+        if not candidates:
+            clean_parts.append(text[i:])
+            break
+
+        pos, typ = min(candidates, key=lambda x: x[0])
+        # Append normal text before the tag.
+        clean_parts.append(text[i:pos])
+        i = pos + (len(open_tag) if typ == "open" else len(close_tag))
+
+        # Update depth and span bookkeeping.
+        clean_len = sum(len(p) for p in clean_parts)
+        if typ == "open":
+            depth += 1
+            if depth == 1:
+                cur_start = clean_len
+        else:  # close
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and cur_start is not None:
+                    obs_spans.append((cur_start, clean_len))
+                    cur_start = None
+
+    clean_text = "".join(clean_parts)
+
+    # If unbalanced (text ends inside observation), close at end.
+    if depth > 0 and cur_start is not None:
+        obs_spans.append((cur_start, len(clean_text)))
+
+    obs_spans = _merge_spans(obs_spans)
+
+    # 2) Retokenize clean_text with offsets.
+    if not getattr(tokenizer, "is_fast", False):
+        raise ValueError("This method needs a fast tokenizer to get offset_mapping.")
+
+    enc = tokenizer(
+        clean_text,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+    )
+
+    clean_ids: List[int] = enc["input_ids"]
+    offsets: List[Tuple[int, int]] = enc["offset_mapping"]
+
+    # 3) Map observation char spans -> token positions.
+    obs_token_positions: List[int] = []
+    j = 0  # pointer over obs_spans
+
+    for tidx, (s, e) in enumerate(offsets):
+        # Skip empty offsets if any.
+        if e <= s:
+            continue
+        # Advance span pointer until span end > token start.
+        while j < len(obs_spans) and obs_spans[j][1] <= s:
+            j += 1
+        if j >= len(obs_spans):
+            break
+        span_s, span_e = obs_spans[j]
+        # Overlap check: token intersects observation characters.
+        if max(s, span_s) < min(e, span_e):
+            obs_token_positions.append(tidx)
+
+    return {
+        "clean_text": clean_text,
+        "clean_ids": clean_ids,
+        "obs_token_positions": obs_token_positions,
+    }
+
+
+
 if __name__=="__main__":
     pass
