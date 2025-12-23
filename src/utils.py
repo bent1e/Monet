@@ -72,6 +72,12 @@ def get_args():
     parser.add_argument("--output_latent_embeds", action='store_true', default=False)
     parser.add_argument("--output_hidden_states", action='store_true', default=False)
     parser.add_argument("--resume", action="store_true", default=False)
+    
+    # ===== Autoencoder arguments =====
+    parser.add_argument("--use_autoencoder", action='store_true', default=False,
+                        help="Enable autoencoder for visual latent reconstruction during training.")
+    parser.add_argument("--autoencoder_weight", type=float, default=0.1,
+                        help="Weight for the autoencoder reconstruction loss.")
 
 
     return parser.parse_args()
