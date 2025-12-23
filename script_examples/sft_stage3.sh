@@ -34,7 +34,10 @@ LATENT_SIZE=8
 CE_EMPHASIZE_FACTOR=4.0
 ALIGNMENT_WEIGHT=2.0
 EMPHASIZE_LATENT_WEIGHT=2.0
-SAVE_CKPT=sft_stage3_target-latent${TEACHER_LATENT_SIZE}-al${TEACHER_ALIGN_WEIGHT}-emph${TEACHER_EMPHASIZE_LATENT_WEIGHT}_student-latent${LATENT_SIZE}-ce${CE_EMPHASIZE_FACTOR}-al${ALIGNMENT_WEIGHT}-emph${EMPHASIZE_LATENT_WEIGHT}
+# Autoencoder parameters
+USE_AUTOENCODER=true
+AUTOENCODER_WEIGHT=0.1
+SAVE_CKPT=sft_stage3_target-latent${TEACHER_LATENT_SIZE}-al${TEACHER_ALIGN_WEIGHT}-emph${TEACHER_EMPHASIZE_LATENT_WEIGHT}_student-latent${LATENT_SIZE}-ce${CE_EMPHASIZE_FACTOR}-al${ALIGNMENT_WEIGHT}-emph${EMPHASIZE_LATENT_WEIGHT}_autoenc${USE_AUTOENCODER}_${AUTOENCODER_WEIGHT}
 torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --epochs 3 \
   --bsz 1 \
@@ -57,4 +60,6 @@ torchrun --nproc-per-node=8 --master-port=29501 -m src.main \
   --alignment_weight ${ALIGNMENT_WEIGHT} \
   --ce_emphasize_factor ${CE_EMPHASIZE_FACTOR} \
   --teacher_latent_dir path_to_your_model/Monet_checkpoints/monet_precomputed_target_latent/${TEACHER} \
-  --alignment_layer all_layers
+  --alignment_layer all_layers \
+  --use_autoencoder \
+  --autoencoder_weight ${AUTOENCODER_WEIGHT}
